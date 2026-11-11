@@ -9,6 +9,7 @@ const app = express();
 const EQUIPO = ['Patricia', 'Sol', 'Betina'];
 const PASS = process.env.APP_PASSWORD;
 app.set('trust proxy', 1);
+app.use(express.static(__dirname + '/public'));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 app.use(cookieSession({ name: 's', secret: process.env.SESSION_SECRET || 'cambiar-en-produccion', maxAge: 30 * 864e5, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
@@ -17,7 +18,7 @@ const log = (caso_id, quien, texto) => q('insert into actividad(caso_id,quien,te
 
 // ---- login ----
 app.get('/entrar', (req, res) => res.send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;background:#FBF0EC;display:grid;place-items:center;height:100vh;margin:0;color:#1F3A4D}form{background:#fff;padding:28px;border-radius:16px;display:grid;gap:12px;width:300px;border:1px solid #E8DCD6}input,select,button{font:inherit;padding:10px;border-radius:10px;border:1px solid #E8DCD6}button{background:#D8626B;color:#fff;font-weight:700;border:0}</style>
-<form method=post action=/entrar><b style="color:#D8626B">paybe CRM</b><select name=quien>${EQUIPO.map(n => `<option>${n}</option>`).join('')}</select><input type=password name=pass placeholder="Contraseña" autofocus><button>Entrar</button>${req.query.mal ? '<small style="color:#B84A53">Contraseña incorrecta</small>' : ''}</form>`));
+<form method=post action=/entrar><div style="text-align:center"><img src="/logo.png" alt="" style="height:56px;margin-bottom:6px" onerror="this.remove()"><div style="color:#D8626B;font-weight:800;font-size:22px">Paybe</div></div><select name=quien>${EQUIPO.map(n => `<option>${n}</option>`).join('')}</select><input type=password name=pass placeholder="Contraseña" autofocus><button>Entrar</button>${req.query.mal ? '<small style="color:#B84A53">Contraseña incorrecta</small>' : ''}</form>`));
 app.post('/entrar', (req, res) => {
   if (!PASS && process.env.NODE_ENV === 'production') return res.status(503).send('Falta configurar APP_PASSWORD en Railway.');
   if (PASS && req.body.pass !== PASS) return res.redirect('/entrar?mal=1');
