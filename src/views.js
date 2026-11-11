@@ -27,7 +27,7 @@ function layout(titulo, body, { quien, activo } = {}) {
   const tabs = [['/', 'Inicio'], ['/leads', 'Leads'], ['/oportunidades', 'Oportunidades'], ['/ventas', 'Ventas'], ['/personas', 'Personas'], ['/cotizaciones', 'Cotizaciones'], ['/dashboards', 'Dashboards']];
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} · Paybe</title>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Newsreader:wght@400;500&display=swap" rel="stylesheet"><style>${CSS}</style></head><body>
-<nav><a href="/" style="display:flex;align-items:center;gap:8px;padding:0"><img src="/logo.png" alt="" style="height:30px" onerror="this.remove()"><b style="color:#D8626B;font-size:18px">Paybe</b></a>${tabs.map(([h, t]) => `<a href="${h}" class="${activo === h ? 'on' : ''}">${t}</a>`).join('')}<span class="sp"></span><a class="btn p" href="/nuevo">+ Agregar lead</a><span class="mut">${esc(quien || '')} · <a href="/salir">salir</a></span></nav>
+<nav><a href="/" style="display:flex;align-items:center;gap:8px;padding:0"><img src="/logo.png" alt="" style="height:38px" onerror="this.remove()"></a>${tabs.map(([h, t]) => `<a href="${h}" class="${activo === h ? 'on' : ''}">${t}</a>`).join('')}<span class="sp"></span><a class="btn p" href="/nuevo">+ Agregar lead</a><span class="mut">${esc(quien || '')} · <a href="/salir">salir</a></span></nav>
 <main>${body}</main></body></html>`;
 }
 const chipFase = f => `<span class="chip ${{ oportunidad: 'op', venta: 've', baja: 'ba' }[f] || ''}">`;
