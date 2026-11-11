@@ -36,5 +36,14 @@ create table if not exists pagos (
 create table if not exists reservas (
   id serial primary key, caso_id int references casos(id) on delete cascade,
   servicio text not null, estado text default 'pendiente');
+alter table personas add column if not exists instagram_id text;
+alter table personas add column if not exists instagram_user text;
+create unique index if not exists personas_instagram_id on personas(instagram_id);
+create table if not exists mensajes (
+  id serial primary key, persona_id int references personas(id) on delete cascade,
+  caso_id int references casos(id) on delete set null, canal text not null default 'instagram',
+  mid text unique, entrante boolean not null, texto text, creado timestamptz default now());
+create index if not exists mensajes_caso on mensajes(caso_id, creado);
+create table if not exists ajustes (clave text primary key, valor text);
 `;
 module.exports = { pool, q, one, init: () => pool.query(SCHEMA) };

@@ -4,16 +4,22 @@ const db = require('./src/db');
 const { q, one } = db;
 const { FASES, ACCIONES, BAJAS, MOTIVOS, accionesPara } = require('./src/flow');
 const { esc, fecha, usd, layout, chipFase } = require('./src/views');
+const ig = require('./src/instagram');
 
 const app = express();
 const EQUIPO = ['Patricia', 'Sol', 'Betina'];
 const PASS = process.env.APP_PASSWORD;
 app.set('trust proxy', 1);
 app.use(express.static(__dirname + '/public'));
+// Instagram avisa acá cuando alguien escribe; va antes del login porque lo llama Meta (se valida con la firma)
+app.get('/webhooks/instagram', ig.verificar);
+app.post('/webhooks/instagram', express.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf; } }), ig.recibir);
+app.get('/privacidad', (req, res) => res.send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Privacidad · Paybe</title><body style="font:16px/1.6 system-ui;max-width:640px;margin:40px auto;padding:0 20px;color:#1F3A4D"><h1>Política de privacidad</h1><p>Esta es una herramienta interna de Paybe Turismo (EVT 6263, Av. Fleming 1897, Martínez, Buenos Aires) para organizar las consultas de sus clientes.</p><p>Cuando alguien le escribe a Paybe por Instagram, guardamos su nombre de usuario y los mensajes de esa conversación, solo para poder responder la consulta y hacer el seguimiento del viaje. No vendemos ni compartimos esos datos con terceros, y no los usamos para publicidad.</p><p>Si querés que borremos tus datos, escribinos por Instagram a @paybe.turismo o acercate a la oficina y los eliminamos.</p></body>`));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 app.use(cookieSession({ name: 's', secret: process.env.SESSION_SECRET || 'cambiar-en-produccion', maxAge: 30 * 864e5, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
 const page = (req, res, titulo, body, activo) => res.send(layout(titulo, body, { quien: req.session.quien, activo }));
+const hace = d => { const m = Math.round((Date.now() - new Date(d)) / 60e3); return m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`; };
 const log = (caso_id, quien, texto) => q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [caso_id, quien, texto]);
 
 // ---- login ----
@@ -47,7 +53,10 @@ app.get('/', wrap(async (req, res) => {
   const avisos = await q(`select a.*, p.nombre, c.id caso from avisos a join casos c on c.id=a.caso_id join personas p on p.id=c.persona_id where not a.hecho order by a.para limit 20`);
   const hoy = new Date().toISOString().slice(0, 10);
   const nuevos = await q(`select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.fase='lead' and c.etapa in ('nuevo','para_cotizar') order by c.actualizado limit 10`);
+  const sinContestar = await q(`select c.id, p.nombre, m.texto, m.creado from casos c join personas p on p.id=c.persona_id
+    join lateral (select * from mensajes where caso_id=c.id order by creado desc limit 1) m on true where m.entrante and c.fase<>'baja' order by m.creado limit 20`);
   page(req, res, 'Inicio', `<h1>Lo de hoy</h1>
+  ${sinContestar.length ? `<h2 style="margin:16px 0 8px">Sin contestar en Instagram · ${sinContestar.length}</h2>${sinContestar.map(m => `<a class="aviso rojo" href="/caso/${m.id}" style="color:inherit"><span><b>${esc(m.nombre)}</b> · ${esc((m.texto || '').slice(0, 90))}</span><span class="mut">${hace(m.creado)}</span></a>`).join('')}` : ''}
   <h2 style="margin:16px 0 8px">Avisos</h2>${avisos.map(a => `<div class="aviso ${String(a.para.toISOString?.().slice(0, 10) || a.para) < hoy ? 'rojo' : ''}"><span><b>${esc(a.nombre)}</b> · ${esc(a.texto)} <span class="mut">(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('') || '<p class=mut>No hay avisos pendientes.</p>'}
   <h2 style="margin:16px 0 8px">Para hacer</h2><div class="card"><table>${nuevos.map(filaCaso).join('') || '<tr><td class=mut>Nada pendiente.</td></tr>'}</table></div>`, '/');
 }));
@@ -71,25 +80,30 @@ app.post('/nuevo', wrap(async (req, res) => {
 
 // ---- caso ----
 app.get('/caso/:id', wrap(async (req, res) => {
-  const c = await one('select c.*, p.nombre, p.whatsapp, p.mail, p.origen from casos c join personas p on p.id=c.persona_id where c.id=$1', [req.params.id]);
+  const c = await one('select c.*, p.nombre, p.whatsapp, p.mail, p.origen, p.instagram_user from casos c join personas p on p.id=c.persona_id where c.id=$1', [req.params.id]);
   if (!c) return res.status(404).send('No existe');
-  const [acts, avisos, chats, pagos, reservas, cots] = await Promise.all([
+  const [acts, avisos, chats, pagos, reservas, cots, msgs] = await Promise.all([
     q('select * from actividad where caso_id=$1 order by creada desc limit 30', [c.id]),
     q('select * from avisos where caso_id=$1 and not hecho order by para', [c.id]),
     q('select * from chats where caso_id=$1 order by creado desc', [c.id]),
     q('select * from pagos where caso_id=$1 order by fecha', [c.id]),
     q('select * from reservas where caso_id=$1 order by id', [c.id]),
     q('select * from cotizaciones where caso_id=$1 order by creada desc', [c.id]),
+    q('select * from (select * from mensajes where caso_id=$1 order by creado desc limit 60) m order by creado', [c.id]),
   ]);
+  const igBtn = c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : '';
+  const hilo = msgs.length ? `<div class="card"><div class="row" style="justify-content:space-between"><h2>Instagram${c.instagram_user ? ` <span class=mut>@${esc(c.instagram_user)}</span>` : ''}</h2>${msgs[msgs.length - 1].entrante ? '<span class="chip op">Sin contestar</span>' : '<span class="chip ve">Contestado</span>'}</div>
+  <div style="display:grid;gap:6px;margin-top:10px;max-height:420px;overflow:auto">${msgs.map(m => `<div style="max-width:78%;padding:8px 12px;border-radius:14px;${m.entrante ? 'background:#F3ECE8;justify-self:start' : 'background:#E3EEF5;justify-self:end'}"><pre>${esc(m.texto)}</pre><div class=mut style="font-size:11px">${m.entrante ? '' : 'Paybe · '}${new Date(m.creado).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}</div></div>`).join('')}</div></div>` : '';
   const etapas = Object.entries(FASES[c.fase].etapas); const idx = etapas.findIndex(([k]) => k === c.etapa);
   const bar = c.fase === 'baja' ? '' : `<div class="bar">${etapas.map(([k, n], i) => `<div class="${i < idx ? 'ok' : i === idx ? 'now' : ''}">${n}${i < idx ? ' ✓' : ''}</div>`).join('')}</div>`;
   const acc = accionesPara(c).map(a => `<form method=post action=/caso/${c.id}/${a.k}>${a.pago ? `<input name=monto placeholder="Monto USD" style="width:130px"> <select name=medio style="width:140px">${['Transferencia', 'Efectivo', 'Tarjeta'].map(m => `<option>${m}</option>`).join('')}</select> ` : ''}<button class="g">${esc(a.label)}</button></form>`).join('');
   const baja = BAJAS[c.fase] ? `<form method=post action=/caso/${c.id}/baja class="row"><select name=motivo style="width:210px">${MOTIVOS.map(m => `<option>${m}</option>`).join('')}</select><button>${BAJAS[c.fase]}</button></form>` : '';
   const wa = c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : '';
-  page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${wa}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a></div></div>${bar}
+  page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a></div></div>${bar}
   ${c.motivo_baja ? `<div class="aviso rojo">Dada de baja: ${esc(c.motivo_baja)}</div>` : ''}
   ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
   <div class="card"><div class="row">${acc}${baja}</div></div>
+  ${hilo}
   <div class="grid"><div class="card"><h2>Datos</h2><form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
   <div><label>Servicio</label><input name=servicio value="${esc(c.servicio)}"></div><div><label>Destino</label><input name=destino value="${esc(c.destino)}"></div>
   <div><label>Fechas</label><input name=fechas value="${esc(c.fechas)}"></div><div><label>Cuántos</label><input name=cuantos value="${esc(c.cuantos)}"></div>
@@ -205,6 +219,20 @@ app.get('/dashboards', wrap(async (req, res) => {
   <div class="card"><h2>Qué origen convierte</h2><table><tr><th>Origen</th><th>Consultas</th><th>Ventas</th></tr>${origen.map(o => `<tr><td>${esc(o.o)}</td><td>${o.n}</td><td>${o.ventas}</td></tr>`).join('')}</table></div></div>`, '/dashboards');
 }));
 
+// ---- instagram: estado de la conexión ----
+app.get('/instagram', wrap(async (req, res) => {
+  const e = await ig.estado(), si = v => v ? '✓' : 'Falta', cuando = d => d ? new Date(d).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }) : '—';
+  page(req, res, 'Instagram', `<h1>Instagram</h1><p class=mut>Los mensajes que llegan a la cuenta entran solos como leads.</p>
+  <div class="card"><table><tr><td>Cuenta conectada</td><td>${e.cuenta ? '@' + esc(e.cuenta) : '—'}</td></tr><tr><td>Token (IG_ACCESS_TOKEN)</td><td>${si(e.token)}</td></tr><tr><td>Secreto de la app (IG_APP_SECRET)</td><td>${si(e.secreto)}</td></tr><tr><td>Clave de verificación (IG_VERIFY_TOKEN)</td><td>${si(e.verify)}</td></tr>
+  <tr><td>Toma mensajes desde</td><td>${cuando(e.desde)}</td></tr><tr><td>Mensajes guardados</td><td>${e.mensajes}</td></tr><tr><td>Último mensaje</td><td>${cuando(e.ultimoMensaje)}</td></tr><tr><td>Último aviso de Meta</td><td>${cuando(e.aviso)}</td></tr><tr><td>Última pasada</td><td>${cuando(e.sync)}</td></tr><tr><td>Token renovado</td><td>${cuando(e.tokenFecha)}</td></tr>
+  ${e.error ? `<tr><td>Último error</td><td style="color:#B84A53">${esc(e.error)}</td></tr>` : ''}</table>
+  <form method=post action=/instagram/sincronizar style="margin-top:12px"><button class="p">Traer mensajes ahora</button> ${req.query.r ? `<span class=mut>${esc(req.query.r)}</span>` : ''}</form></div>`, '/instagram');
+}));
+app.post('/instagram/sincronizar', wrap(async (req, res) => {
+  const r = await ig.sincronizar().catch(e => ({ ok: false, motivo: e.message }));
+  res.redirect('/instagram?r=' + encodeURIComponent(r.ok ? `Listo: ${r.nuevos} mensajes nuevos.` : 'No se pudo: ' + r.motivo));
+}));
+
 app.use((e, req, res, next) => { console.error(e); res.status(500).send('Algo salió mal. Probá de nuevo.'); });
 const port = process.env.PORT || 3000;
-db.init().then(() => app.listen(port, () => console.log('Paybe CRM en el puerto ' + port))).catch(e => { console.error(e); process.exit(1); });
+db.init().then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message)); })).catch(e => { console.error(e); process.exit(1); });
