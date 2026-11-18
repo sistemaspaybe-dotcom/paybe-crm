@@ -7,3 +7,12 @@ Las tablas se crean solas al arrancar. `npm start`.
 
 Los DM de la cuenta entran solos como leads. Variables: `IG_ACCESS_TOKEN` (token de larga duración de la cuenta; después se renueva solo), `IG_APP_SECRET` (secreto de la app de Instagram en Meta), `IG_VERIFY_TOKEN` (clave inventada, la misma que se carga en el webhook de Meta).
 Webhook: `https://<dominio>/webhooks/instagram`, campo `messages`. Estado de la conexión en `/instagram`. Política de privacidad pública en `/privacidad`.
+
+## Preguntas, semáforo y cotizador (17/11)
+
+- **Etapas del lead:** Nuevo → Preguntando → Aguardando datos → Para cotizar → Cotizando → Esperando respuesta → Convertido (pasa a Oportunidad) o Perdido.
+- **La IA** (necesita `ANTHROPIC_API_KEY`) lee el chat, guarda lo común en la consulta y lo de cada destino en su ficha (`destinos`), arma un solo mensaje con todo lo que falta (borrador que el equipo manda desde el CRM) y pone el semáforo por destino.
+- **Semáforo:** mínimo = aéreo + días × costo por día (+% en temporada alta); verde desde el 100%, rojo debajo del 75%. Se edita en `/ajustes`.
+- **Recordatorio:** a las 20 h del último mensaje del cliente sin respuesta, una sola vez. **Seguimiento** de la cotización a los 3 y 7 días.
+- **Cotizador** por destino (`/destino/:id/cotizar`): ítems con costo y margen, banco de cotizaciones parecidas, versiones (v1, v2…) y propuesta pública en `/c/:token` (se descarga como PDF desde el navegador).
+- Instagram solo deja mandar desde el CRM dentro de las 24 h del último mensaje del cliente; fuera de esa ventana el CRM ofrece copiar el texto.

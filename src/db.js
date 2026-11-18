@@ -45,5 +45,49 @@ create table if not exists mensajes (
   mid text unique, entrante boolean not null, texto text, creado timestamptz default now());
 create index if not exists mensajes_caso on mensajes(caso_id, creado);
 create table if not exists ajustes (clave text primary key, valor text);
+alter table casos add column if not exists borrador text;
+alter table casos add column if not exists borrador_tipo text;
+alter table casos add column if not exists borrador_en timestamptz;
+alter table casos add column if not exists tipo_destinos text;
+alter table casos add column if not exists salida text;
+alter table casos add column if not exists confirma text;
+alter table casos add column if not exists senales text;
+alter table casos add column if not exists preguntas_en timestamptz;
+alter table casos add column if not exists recordatorio_en timestamptz;
+alter table casos add column if not exists cotizando_por text;
+alter table casos add column if not exists cotizando_desde timestamptz;
+alter table casos add column if not exists viene_de int;
+create table if not exists destinos (
+  id serial primary key, caso_id int references casos(id) on delete cascade, nombre text not null,
+  fechas text, dias int, detalle text, presupuesto text, presupuesto_usd numeric, preferencia text,
+  semaforo text, motivo text, estado text not null default 'pendiente', creado timestamptz default now());
+create index if not exists destinos_caso on destinos(caso_id);
+alter table cotizaciones add column if not exists destino_id int references destinos(id) on delete set null;
+alter table cotizaciones add column if not exists version int default 1;
+alter table cotizaciones add column if not exists estado text;
+alter table cotizaciones add column if not exists items jsonb default '[]';
+alter table cotizaciones add column if not exists costo_pp numeric;
+alter table cotizaciones add column if not exists sena_pct numeric default 20;
+alter table cotizaciones add column if not exists valida_hasta date;
+alter table cotizaciones add column if not exists no_incluye text;
+alter table cotizaciones add column if not exists token text;
+alter table cotizaciones add column if not exists base_id int;
+alter table cotizaciones add column if not exists inicio timestamptz;
+alter table cotizaciones add column if not exists enviada_en timestamptz;
+alter table cotizaciones add column if not exists quien text;
+create unique index if not exists cotizaciones_token on cotizaciones(token);
+update cotizaciones set estado='mandada' where estado is null;
+alter table cotizaciones alter column estado set default 'borrador';
 `;
-module.exports = { pool, q, one, init: () => pool.query(SCHEMA) };
+// cambios de etapas de una sola vez (17/11): Mandada pasa a Esperando respuesta; el viejo Preguntando (ya contestaron) es Aguardando datos
+async function migrar() {
+  const hecho = await one("select 1 from ajustes where clave='migracion_etapas_v4'");
+  if (hecho) return;
+  await q("update casos set etapa='esperando' where fase='lead' and etapa='mandada'");
+  await q("update casos set etapa='aguardando' where fase='lead' and etapa='preguntando'");
+  await q("update casos set etapa='reservando' where fase='venta' and etapa='sena'");
+  await q("update casos set baja_desde='lead' where fase='baja' and baja_desde is null");
+  await q(`insert into destinos(caso_id,nombre,fechas,presupuesto,estado) select id, destino, fechas, presupuesto, case when fase='lead' then 'pendiente' else 'eligio' end from casos c where destino is not null and destino<>'' and not exists (select 1 from destinos d where d.caso_id=c.id)`);
+  await q("insert into ajustes(clave,valor) values('migracion_etapas_v4', now()::text)");
+}
+module.exports = { pool, q, one, init: () => pool.query(SCHEMA).then(migrar) };

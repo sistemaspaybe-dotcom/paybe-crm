@@ -3,6 +3,7 @@ const cookieSession = require('cookie-session');
 const db = require('./src/db');
 const { q, one } = db;
 const { FASES, ACCIONES, BAJAS, MOTIVOS, accionesPara } = require('./src/flow');
+const ia = require('./src/ia');
 const { esc, fecha, usd, layout, chipFase } = require('./src/views');
 const ig = require('./src/instagram');
 
@@ -16,6 +17,7 @@ app.get('/webhooks/instagram', ig.verificar);
 app.post('/webhooks/instagram', express.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf; } }), ig.recibir);
 app.get('/privacidad', (req, res) => res.send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Privacidad · Paybe</title><body style="font:16px/1.6 system-ui;max-width:640px;margin:40px auto;padding:0 20px;color:#1F3A4D"><h1>Política de privacidad</h1><p>Esta es una herramienta interna de Paybe Turismo (EVT 6263, Av. Fleming 1897, Martínez, Buenos Aires) para organizar las consultas de sus clientes.</p><p>Cuando alguien le escribe a Paybe por Instagram, guardamos su nombre de usuario y los mensajes de esa conversación, solo para poder responder la consulta y hacer el seguimiento del viaje. No vendemos ni compartimos esos datos con terceros, y no los usamos para publicidad.</p><p>Si querés que borremos tus datos, escribinos por Instagram a @paybe.turismo o acercate a la oficina y los eliminamos.</p></body>`));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
+require('./src/rutas').publica(app, { wrap: f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next) });
 app.use(cookieSession({ name: 's', secret: process.env.SESSION_SECRET || 'cambiar-en-produccion', maxAge: 30 * 864e5, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
 const page = (req, res, titulo, body, activo) => res.send(layout(titulo, body, { quien: req.session.quien, activo }));
@@ -37,9 +39,11 @@ app.use((req, res, next) => (req.session.quien || (!PASS && process.env.NODE_ENV
 app.use((req, res, next) => { if (!req.session.quien) req.session.quien = 'Equipo'; next(); });
 
 // ---- listas ----
-const filaCaso = c => `<tr><td><a href="/caso/${c.id}"><b>${esc(c.nombre)}</b></a><div class="mut">${esc(c.destino || '')}</div></td><td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span></td><td>${esc(c.servicio || '')}</td><td class="mut">${esc(c.fechas || '')} ${c.cuantos ? '· ' + esc(c.cuantos) : ''}</td><td class="mut">${fecha(c.actualizado)}</td></tr>`;
+const SEMI = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };
+const chipsDestinos = c => (c.dests || []).filter(d => d && d.nombre).map(d => `<span class="chip" style="margin:2px 2px 0 0">${SEMI[d.semaforo] && ['pendiente', 'semaforo'].includes(d.estado) ? SEMI[d.semaforo] + ' ' : ''}${esc(d.nombre)}${d.estado === 'cotizado' ? ' · cotizado' : d.estado === 'eligio' ? ' ✓' : ''}</span>`).join('');
+const filaCaso = c => `<tr><td><a href="/caso/${c.id}"><b>${esc(c.nombre)}</b></a><div>${chipsDestinos(c) || `<span class="mut">${esc(c.destino || '')}</span>`}</div>${c.borrador ? '<div class=mut>✎ Borrador para mandar</div>' : ''}</td><td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span></td><td>${esc(c.servicio || '')}</td><td class="mut">${esc(c.fechas || '')} ${c.cuantos ? '· ' + esc(c.cuantos) : ''}</td><td class="mut">${fecha(c.actualizado)}</td></tr>`;
 async function lista(req, res, fase, titulo, ruta) {
-  const rows = await q('select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.fase=$1 order by c.actualizado desc', [fase]);
+  const rows = await q(`select c.*, p.nombre, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests from casos c join personas p on p.id=c.persona_id where c.fase=$1 order by c.actualizado desc`, [fase]);
   const orden = Object.keys(FASES[fase].etapas);
   const porEtapa = orden.map(e => `<span class="chip">${FASES[fase].etapas[e]} · ${rows.filter(r => r.etapa === e).length}</span>`).join(' ');
   page(req, res, titulo, `<h1>${titulo} · ${rows.length}</h1><p>${porEtapa}</p><div class="card"><table><tr><th>Persona</th><th>Etapa</th><th>Servicio</th><th>Viaje</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
@@ -52,13 +56,13 @@ app.get('/ventas', wrap((req, res) => lista(req, res, 'venta', 'Ventas', '/venta
 app.get('/', wrap(async (req, res) => {
   const avisos = await q(`select a.*, p.nombre, c.id caso from avisos a join casos c on c.id=a.caso_id join personas p on p.id=c.persona_id where not a.hecho order by a.para limit 20`);
   const hoy = new Date().toISOString().slice(0, 10);
-  const nuevos = await q(`select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.fase='lead' and c.etapa in ('nuevo','para_cotizar') order by c.actualizado limit 10`);
+  const nuevos = await q(`select c.*, p.nombre, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests from casos c join personas p on p.id=c.persona_id where (c.fase='lead' and (c.etapa in ('para_cotizar','cotizando') or c.borrador is not null)) or (c.fase='oportunidad' and c.etapa='le_intereso') order by c.actualizado limit 20`);
   const sinContestar = await q(`select c.id, p.nombre, m.texto, m.creado from casos c join personas p on p.id=c.persona_id
     join lateral (select * from mensajes where caso_id=c.id order by creado desc limit 1) m on true where m.entrante and c.fase<>'baja' order by m.creado limit 20`);
   page(req, res, 'Inicio', `<h1>Lo de hoy</h1>
   ${sinContestar.length ? `<h2 style="margin:16px 0 8px">Sin contestar en Instagram · ${sinContestar.length}</h2>${sinContestar.map(m => `<a class="aviso rojo" href="/caso/${m.id}" style="color:inherit"><span><b>${esc(m.nombre)}</b> · ${esc((m.texto || '').slice(0, 90))}</span><span class="mut">${hace(m.creado)}</span></a>`).join('')}` : ''}
   <h2 style="margin:16px 0 8px">Avisos</h2>${avisos.map(a => `<div class="aviso ${String(a.para.toISOString?.().slice(0, 10) || a.para) < hoy ? 'rojo' : ''}"><span><b>${esc(a.nombre)}</b> · ${esc(a.texto)} <span class="mut">(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('') || '<p class=mut>No hay avisos pendientes.</p>'}
-  <h2 style="margin:16px 0 8px">Para hacer</h2><div class="card"><table>${nuevos.map(filaCaso).join('') || '<tr><td class=mut>Nada pendiente.</td></tr>'}</table></div>`, '/');
+  <h2 style="margin:16px 0 8px">Para hacer: mensajes para mandar, para cotizar y cotizando</h2><div class="card"><table>${nuevos.map(filaCaso).join('') || '<tr><td class=mut>Nada pendiente.</td></tr>'}</table></div>`, '/');
 }));
 app.post('/aviso/:id/hecho', wrap(async (req, res) => { await q('update avisos set hecho=true where id=$1', [req.params.id]); res.redirect(req.get('referer') || '/'); }));
 
@@ -79,52 +83,6 @@ app.post('/nuevo', wrap(async (req, res) => {
 }));
 
 // ---- caso ----
-app.get('/caso/:id', wrap(async (req, res) => {
-  const c = await one('select c.*, p.nombre, p.whatsapp, p.mail, p.origen, p.instagram_user from casos c join personas p on p.id=c.persona_id where c.id=$1', [req.params.id]);
-  if (!c) return res.status(404).send('No existe');
-  const [acts, avisos, chats, pagos, reservas, cots, msgs] = await Promise.all([
-    q('select * from actividad where caso_id=$1 order by creada desc limit 30', [c.id]),
-    q('select * from avisos where caso_id=$1 and not hecho order by para', [c.id]),
-    q('select * from chats where caso_id=$1 order by creado desc', [c.id]),
-    q('select * from pagos where caso_id=$1 order by fecha', [c.id]),
-    q('select * from reservas where caso_id=$1 order by id', [c.id]),
-    q('select * from cotizaciones where caso_id=$1 order by creada desc', [c.id]),
-    q('select * from (select * from mensajes where caso_id=$1 order by creado desc limit 60) m order by creado', [c.id]),
-  ]);
-  const igBtn = c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : '';
-  const hilo = msgs.length ? `<div class="card"><div class="row" style="justify-content:space-between"><h2>Instagram${c.instagram_user ? ` <span class=mut>@${esc(c.instagram_user)}</span>` : ''}</h2>${msgs[msgs.length - 1].entrante ? '<span class="chip op">Sin contestar</span>' : '<span class="chip ve">Contestado</span>'}</div>
-  <div style="display:grid;gap:6px;margin-top:10px;max-height:420px;overflow:auto">${msgs.map(m => `<div style="max-width:78%;padding:8px 12px;border-radius:14px;${m.entrante ? 'background:#F3ECE8;justify-self:start' : 'background:#E3EEF5;justify-self:end'}"><pre>${esc(m.texto)}</pre><div class=mut style="font-size:11px">${m.entrante ? '' : 'Paybe · '}${new Date(m.creado).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}</div></div>`).join('')}</div></div>` : '';
-  const etapas = Object.entries(FASES[c.fase].etapas); const idx = etapas.findIndex(([k]) => k === c.etapa);
-  const bar = c.fase === 'baja' ? '' : `<div class="bar">${etapas.map(([k, n], i) => `<div class="${i < idx ? 'ok' : i === idx ? 'now' : ''}">${n}${i < idx ? ' ✓' : ''}</div>`).join('')}</div>`;
-  const acc = accionesPara(c).map(a => `<form method=post action=/caso/${c.id}/${a.k}>${a.pago ? `<input name=monto placeholder="Monto USD" style="width:130px"> <select name=medio style="width:140px">${['Transferencia', 'Efectivo', 'Tarjeta'].map(m => `<option>${m}</option>`).join('')}</select> ` : ''}<button class="g">${esc(a.label)}</button></form>`).join('');
-  const baja = BAJAS[c.fase] ? `<form method=post action=/caso/${c.id}/baja class="row"><select name=motivo style="width:210px">${MOTIVOS.map(m => `<option>${m}</option>`).join('')}</select><button>${BAJAS[c.fase]}</button></form>` : '';
-  const wa = c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : '';
-  page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a></div></div>${bar}
-  ${c.motivo_baja ? `<div class="aviso rojo">Dada de baja: ${esc(c.motivo_baja)}</div>` : ''}
-  ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
-  <div class="card"><div class="row">${acc}${baja}</div></div>
-  ${hilo}
-  <div class="grid"><div class="card"><h2>Datos</h2><form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
-  <div><label>Servicio</label><input name=servicio value="${esc(c.servicio)}"></div><div><label>Destino</label><input name=destino value="${esc(c.destino)}"></div>
-  <div><label>Fechas</label><input name=fechas value="${esc(c.fechas)}"></div><div><label>Cuántos</label><input name=cuantos value="${esc(c.cuantos)}"></div>
-  <div><label>Presupuesto</label><input name=presupuesto value="${esc(c.presupuesto)}"></div><div><label>Total venta USD</label><input name=total value="${c.total ?? ''}"></div>
-  <div><label>Sale</label><input type=date name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"></div><div><label>Vuelve</label><input type=date name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}"></div>
-  <div style="grid-column:1/-1"><button class="p">Guardar</button></div></form></div>
-  <div class="card"><h2>Recordame</h2><form method=post action=/caso/${c.id}/aviso class="f" style="margin-top:8px"><div><label>Cuándo</label><input type=date name=para required value="${new Date(Date.now() + 864e5 * 2).toISOString().slice(0, 10)}"></div><div><label>Qué</label><input name=texto required placeholder="Chequear si contestó"></div><div><button>Crear aviso</button></div></form></div></div>
-  <div class="card"><h2>Chat con la persona</h2><p class=mut>Pegá el chat y se guarda con un resumen. Después lo podemos analizar para mejorar las ventas.</p>
-  <form method=post action=/caso/${c.id}/chat><textarea name=texto rows=5 placeholder="Pegá acá el chat de WhatsApp"></textarea><p><button class="p">Guardar y resumir</button></p></form>
-  ${chats.map(h => `<div class="card" style="background:#FFF8F6"><b>${fecha(h.creado)}</b><pre>${esc(h.resumen || '(sin resumen: falta la clave de IA)')}</pre></div>`).join('')}</div>
-  <div class="grid"><div class="card"><h2>Pagos</h2><table>${pagos.map(p => `<tr><td>${fecha(p.fecha)}</td><td>${esc(p.que)}</td><td>${esc(p.medio)}</td><td>${usd(p.monto)}</td></tr>`).join('') || '<tr><td class=mut>Sin pagos.</td></tr>'}</table></div>
-  <div class="card"><h2>Reservas</h2>${reservas.map(r => `<div class=row style="justify-content:space-between"><span>${esc(r.servicio)}</span><form method=post action=/reserva/${r.id}/toggle><button>${r.estado === 'confirmada' ? 'Confirmada ✓' : 'Pendiente'}</button></form></div>`).join('') || '<p class=mut>Sin reservas.</p>'}
-  <form method=post action=/caso/${c.id}/reserva class="row" style="margin-top:8px"><input name=servicio placeholder="Aéreo, hotel…" style="flex:1"><button>Agregar</button></form></div></div>
-  <div class="card"><h2>Cotizaciones</h2>${cots.map(k => `<div>${esc(k.viaje)} · ${usd(k.precio_pp)} pp · ${esc(k.resultado)}</div>`).join('') || '<p class=mut>Ninguna registrada.</p>'}<p><a class="btn" href="/cotizaciones/nueva?caso=${c.id}">+ Registrar una cotización</a></p></div>
-  <div class="card"><h2>Actividad</h2>${acts.map(a => `<div>• ${esc(a.texto)} <span class=mut>${esc(a.quien || '')} · ${fecha(a.creada)}</span></div>`).join('')}</div>`, '/' + { lead: 'leads', oportunidad: 'oportunidades', venta: 'ventas', baja: 'leads' }[c.fase]);
-}));
-app.post('/caso/:id/datos', wrap(async (req, res) => {
-  const b = req.body, n = v => v === '' ? null : v;
-  await q('update casos set servicio=$1,destino=$2,fechas=$3,cuantos=$4,presupuesto=$5,total=$6,sale=$7,vuelve=$8,actualizado=now() where id=$9', [b.servicio, b.destino, b.fechas, b.cuantos, b.presupuesto, n(b.total), n(b.sale), n(b.vuelve), req.params.id]);
-  res.redirect('/caso/' + req.params.id);
-}));
 app.post('/caso/:id/aviso', wrap(async (req, res) => {
   await q('insert into avisos(caso_id,para,texto) values($1,$2,$3)', [req.params.id, req.body.para, req.body.texto]);
   await log(req.params.id, req.session.quien, 'Aviso creado: ' + req.body.texto); res.redirect('/caso/' + req.params.id);
@@ -133,25 +91,14 @@ app.post('/caso/:id/baja', wrap(async (req, res) => {
   const c = await one('select * from casos where id=$1', [req.params.id]);
   await q(`update casos set fase='baja', etapa='baja', baja_desde=$1, motivo_baja=$2, actualizado=now() where id=$3`, [c.fase, req.body.motivo, c.id]);
   await q('update avisos set hecho=true where caso_id=$1', [c.id]);
-  await log(c.id, req.session.quien, `Dada de baja (${c.fase}): ${req.body.motivo}.`); res.redirect('/caso/' + c.id);
+  await q(`update destinos set estado='descartado' where caso_id=$1 and estado not in ('eligio','no_eligio','descartado')`, [c.id]);
+  await log(c.id, req.session.quien, `Perdido (${FASES[c.fase].nombre}): ${req.body.motivo}.`); res.redirect('/caso/' + c.id);
 }));
 app.post('/caso/:id/reserva', wrap(async (req, res) => { await q('insert into reservas(caso_id,servicio) values($1,$2)', [req.params.id, req.body.servicio]); res.redirect('/caso/' + req.params.id); }));
 app.post('/reserva/:id/toggle', wrap(async (req, res) => {
   const r = await one(`update reservas set estado=case when estado='confirmada' then 'pendiente' else 'confirmada' end where id=$1 returning caso_id`, [req.params.id]); res.redirect('/caso/' + r.caso_id);
 }));
-app.post('/caso/:id/chat', wrap(async (req, res) => {
-  const resumen = await resumir(req.body.texto);
-  await q('insert into chats(caso_id,texto,resumen) values($1,$2,$3)', [req.params.id, req.body.texto, resumen]);
-  await log(req.params.id, req.session.quien, 'Chat importado.'); res.redirect('/caso/' + req.params.id);
-}));
-async function resumir(texto) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: process.env.AI_MODEL || 'claude-haiku-5-5', max_tokens: 600, messages: [{ role: 'user', content: 'Sos asistente de una agencia de viajes. Resumí este chat de WhatsApp en español rioplatense, con viñetas cortas: qué quiere la persona, qué datos faltan, qué se le prometió y cómo conviene seguir. Al final, una línea con una mejora de venta posible.\n\n' + texto.slice(0, 20000) }] }) });
-    const j = await r.json(); return j.content?.[0]?.text || null;
-  } catch (e) { console.error('IA:', e.message); return null; }
-}
+require('./src/rutas')(app, { wrap, page, log, hace });
 // acciones de etapa
 app.post('/caso/:id/:accion', wrap(async (req, res, next) => {
   const a = ACCIONES[req.params.accion]; if (!a) return next();
@@ -183,10 +130,10 @@ app.post('/persona/:id', wrap(async (req, res) => { const b = req.body; await q(
 // ---- cotizaciones ----
 app.get('/cotizaciones', wrap(async (req, res) => {
   const s = '%' + (req.query.q || '') + '%';
-  const rows = await q('select * from cotizaciones where viaje ilike $1 order by mandada desc, id desc', [s]);
-  page(req, res, 'Cotizaciones', `<div class="row" style="justify-content:space-between"><div><h1>Cotizaciones</h1><p class=mut>Las últimas que mandaste, guardadas. Cuando otro cliente pide lo mismo, la reutilizás de base.</p></div><a class="btn p" href="/cotizaciones/nueva">+ Registrar una cotización</a></div>
+  const rows = await q(`select k.*, p.nombre from cotizaciones k left join casos c on c.id=k.caso_id left join personas p on p.id=c.persona_id where k.viaje ilike $1 and k.estado<>'borrador' order by k.mandada desc nulls last, k.id desc`, [s]);
+  page(req, res, 'Cotizaciones', `<div class="row" style="justify-content:space-between"><div><h1>Cotizaciones</h1><p class=mut>Todas las que se mandaron. Cuando otro cliente pide lo mismo destino, el cotizador te las ofrece como base.</p></div><a class="btn p" href="/cotizaciones/nueva">+ Registrar una cotización</a></div>
   <form class="row" style="margin:10px 0"><input name=q value="${esc(req.query.q || '')}" placeholder="Buscar por viaje" style="max-width:340px"><button>Buscar</button></form>
-  <div class="card"><table><tr><th>Viaje</th><th>Mandada</th><th>Cuántos</th><th>Precio pp</th><th>Margen</th><th>Resultado</th><th></th></tr>${rows.map(k => `<tr><td><b>${esc(k.viaje)}</b><div class=mut>${esc(k.detalle)}</div></td><td>${fecha(k.mandada)}</td><td>${esc(k.cuantos)}</td><td>${usd(k.precio_pp)}</td><td>${k.margen != null ? k.margen + '%' : '—'}</td><td>${esc(k.resultado)}</td><td><a class="btn" href="/cotizaciones/nueva?base=${k.id}">Reutilizar</a></td></tr>`).join('') || '<tr><td colspan=7 class=mut>Todavía no hay cotizaciones.</td></tr>'}</table></div>`, '/cotizaciones');
+  <div class="card"><table><tr><th>Viaje</th><th>Mandada</th><th>Cuántos</th><th>Precio pp</th><th>Margen</th><th>Resultado</th><th></th></tr>${rows.map(k => `<tr><td><b>${esc(k.viaje)}</b>${k.version > 1 ? ` <span class=mut>v${k.version}</span>` : ''}<div class=mut>${esc(k.nombre || '')} · ${esc(k.detalle)}</div></td><td>${fecha(k.mandada)}</td><td>${esc(k.cuantos)}</td><td>${usd(k.precio_pp)}</td><td>${k.margen != null ? k.margen + '%' : '—'}</td><td>${esc({ mandada: 'Mandada', aceptada: 'Aceptada ✓', reemplazada: 'Reemplazada', no_eligio: 'No eligió' }[k.estado] || k.resultado)}</td><td>${k.token ? `<a class="btn" target=_blank href="/c/${k.token}">Ver</a>` : `<a class="btn" href="/cotizaciones/nueva?base=${k.id}">Reutilizar</a>`}</td></tr>`).join('') || '<tr><td colspan=7 class=mut>Todavía no hay cotizaciones.</td></tr>'}</table></div>`, '/cotizaciones');
 }));
 app.get('/cotizaciones/nueva', wrap(async (req, res) => {
   const b = req.query.base ? await one('select * from cotizaciones where id=$1', [req.query.base]) : {};
@@ -213,9 +160,9 @@ app.get('/dashboards', wrap(async (req, res) => {
   const cot = await one(`select count(*)::int n, count(*) filter (where resultado='vendió')::int v from cotizaciones where mandada > current_date-7`);
   const tot = n('lead') + n('oportunidad') + n('venta') + n('baja') || 1;
   page(req, res, 'Dashboards', `<h1>Dashboards</h1><p class=mut>Se arma solo con lo que registran en el CRM.</p>
-  <div class="grid"><div class="card"><div class=mut>Consultas en 7 días</div><h1>${sem.consultas}</h1></div><div class="card"><div class=mut>Cotizaciones en 7 días</div><h1>${cot.n}</h1></div><div class="card"><div class=mut>Ventas en curso</div><h1>${n('venta')}</h1></div><div class="card"><div class=mut>Dadas de baja</div><h1>${n('baja')}</h1></div></div>
-  <div class="card"><h2>Embudo: dónde se cae la gente</h2><table><tr><td>Leads</td><td>${n('lead')}</td></tr><tr><td>Oportunidades</td><td>${n('oportunidad')}</td></tr><tr><td>Ventas</td><td>${n('venta')}</td></tr><tr><td>Dadas de baja</td><td>${n('baja')} (${Math.round(100 * n('baja') / tot)}%)</td></tr></table></div>
-  <div class="grid"><div class="card"><h2>Por qué se cierran</h2><table>${motivos.map(m => `<tr><td>${esc(m.m)}</td><td class=mut>${esc(m.d)}</td><td>${m.n}</td></tr>`).join('') || '<tr><td class=mut>Todavía no hay bajas.</td></tr>'}</table></div>
+  <div class="grid"><div class="card"><div class=mut>Consultas en 7 días</div><h1>${sem.consultas}</h1></div><div class="card"><div class=mut>Cotizaciones en 7 días</div><h1>${cot.n}</h1></div><div class="card"><div class=mut>Ventas en curso</div><h1>${n('venta')}</h1></div><div class="card"><div class=mut>Perdidos</div><h1>${n('baja')}</h1></div></div>
+  <div class="card"><h2>Embudo: dónde se cae la gente</h2><table><tr><td>Leads</td><td>${n('lead')}</td></tr><tr><td>Oportunidades</td><td>${n('oportunidad')}</td></tr><tr><td>Ventas</td><td>${n('venta')}</td></tr><tr><td>Perdidos</td><td>${n('baja')} (${Math.round(100 * n('baja') / tot)}%)</td></tr></table></div>
+  <div class="grid"><div class="card"><h2>Por qué se pierden</h2><table>${motivos.map(m => `<tr><td>${esc(m.m)}</td><td class=mut>${esc(m.d)}</td><td>${m.n}</td></tr>`).join('') || '<tr><td class=mut>Todavía no hay perdidos.</td></tr>'}</table></div>
   <div class="card"><h2>Qué origen convierte</h2><table><tr><th>Origen</th><th>Consultas</th><th>Ventas</th></tr>${origen.map(o => `<tr><td>${esc(o.o)}</td><td>${o.n}</td><td>${o.ventas}</td></tr>`).join('')}</table></div></div>`, '/dashboards');
 }));
 
@@ -235,4 +182,6 @@ app.post('/instagram/sincronizar', wrap(async (req, res) => {
 
 app.use((e, req, res, next) => { console.error(e); res.status(500).send('Algo salió mal. Probá de nuevo.'); });
 const port = process.env.PORT || 3000;
-db.init().then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message)); })).catch(e => { console.error(e); process.exit(1); });
+db.init().then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message));
+  const tarea = () => ia.revisarRecordatorios().then(ia.revisarSeguimientos).catch(e => console.error('Recordatorios:', e.message));
+  setTimeout(tarea, 30e3); setInterval(tarea, 5 * 60e3).unref(); })).catch(e => { console.error(e); process.exit(1); });
