@@ -86,6 +86,7 @@ async function registrar({ igsid, username, nombre, mid, entrante, texto, cuando
 
 // ---- mandar un mensaje desde el CRM (sale desde la cuenta de Paybe) ----
 async function enviar(igsid, texto) {
+  if (String(igsid).startsWith('demo-')) return 'demo-out-' + Date.now(); // consultas de prueba: no sale nada a Instagram
   const t = await token(); if (!t) throw new Error('Falta IG_ACCESS_TOKEN');
   const r = await fetch(API + '/me/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + t, 'content-type': 'application/json' },
     body: JSON.stringify({ recipient: { id: String(igsid) }, message: { text: String(texto).slice(0, 1000) } }) }).then(r => r.json());

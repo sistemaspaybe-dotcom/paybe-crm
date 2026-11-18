@@ -6,6 +6,7 @@ const { esc, fecha, usd } = require('./views');
 const ig = require('./instagram');
 const ia = require('./ia');
 const reglas = require('./reglas');
+const demo = require('./demo');
 
 const SEM = { verde: ['🟢', 'Para cotizar', '#E0F0E6', '#1E5A3A'], amarillo: ['🟡', 'Tibio', '#FFF3D6', '#8A5A00'], rojo: ['🔴', 'No cotizar', '#FBE4E7', '#B84A53'] };
 const n2 = v => v === '' || v == null ? null : v;
@@ -99,6 +100,8 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ${otras.length ? `<div class="aviso">Esta persona tiene ${otras.length} consulta${otras.length > 1 ? 's' : ''} más abierta${otras.length > 1 ? 's' : ''}: ${otras.map(o => `<a href="/caso/${o.id}">${esc(o.destino || 'consulta')} (${esc(FASES[o.fase].etapas[o.etapa] || o.etapa)})</a>`).join(', ')}</div>` : ''}
     ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
+    ${c.origen === 'Demo' && c.fase === 'lead' && c.etapa === 'aguardando' && !c.borrador ? `<div class="aviso" style="background:#E3EEF5"><span><b>Consulta de prueba.</b> Simulá que el cliente contesta las preguntas para ver qué hace la IA.</span><form method=post action=/demo/${c.id}/responder><button class="p">Simular la respuesta del cliente</button></form></div>` : ''}
+    ${c.origen === 'Demo' ? '<div class="mut" style="margin-bottom:8px">🧪 Consulta de prueba: los mensajes no salen a Instagram.</div>' : ''}
     ${borrador}${respuesta}${sena}
     ${acc || baja ? `<div class="card"><div class="row">${acc}${baja}</div></div>` : ''}
     ${destinosHtml}
@@ -334,6 +337,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
     res.redirect('/caso/' + c.id);
   }));
 
+  // ---------- consultas de prueba ----------
+  app.post('/demo/cargar', wrap(async (req, res) => { await demo.cargar(); res.redirect('/leads'); }));
+  app.post('/demo/borrar', wrap(async (req, res) => { await demo.borrar(); res.redirect('/ajustes?ok=1'); }));
+  app.post('/demo/:id/responder', wrap(async (req, res) => { await demo.responder(req.params.id); res.redirect('/caso/' + req.params.id); }));
+
   // ---------- ajustes ----------
   app.get('/ajustes', wrap(async (req, res) => {
     const R = await reglas.todas();
@@ -346,7 +354,9 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ${[...R.minimos, ['', '', '', ''], ['', '', '', '']].map((m, i) => `<tr><td><input name="m_nombre_${i}" value="${esc(m[0])}"></td><td><input name="m_palabras_${i}" value="${esc(m[1])}"></td><td><input name="m_aereo_${i}" value="${esc(m[2])}" style="width:90px"></td><td><input name="m_dia_${i}" value="${esc(m[3])}" style="width:90px"></td><td class=mut>${m[2] ? usd(Number(m[2]) + 10 * Number(m[3])) : ''}</td></tr>`).join('')}</table></div></div>
     <div class="card"><h2>3 · Semáforo</h2><div class="f"><div><label>🟢 Verde desde el % del mínimo</label><input name=verde value="${R.cortes.verde}"></div><div><label>🔴 Rojo debajo del % del mínimo</label><input name=rojo value="${R.cortes.rojo}"></div><div><label>Temporada alta: suma %</label><input name=alta value="${R.cortes.alta}"></div><div><label>Meses de temporada alta (números)</label><input name=meses value="${(R.cortes.mesesAlta || []).join(', ')}"></div></div>
     <p class=mut>Además: fechas vagas o sin presupuesto → como mucho 🟡. "Pasame solo el precio" → baja un nivel. No contestó ni después del recordatorio → 🔴. Ya es cliente → nunca 🔴. Visas y aéreos sueltos → directo a cotizar.</p></div>
-    <p><button class="p">Guardar</button> ${req.query.ok ? '<span class=mut>Guardado ✓</span>' : ''}</p></form>`, '/ajustes');
+    <p><button class="p">Guardar</button> ${req.query.ok ? '<span class=mut>Listo ✓</span>' : ''}</p></form>
+    <div class="card"><h2>Consultas de prueba</h2><p class=mut>Carga 8 consultas de ejemplo (marcadas con 🧪) para mostrar cómo trabaja el CRM: preguntas armadas por la IA, varios destinos, semáforo, cotizaciones y una oportunidad. Los mensajes no salen a Instagram. Volver a cargarlas reemplaza las anteriores.</p>
+    <div class="row"><form method=post action=/demo/cargar><button class="p">Cargar consultas de prueba</button></form><form method=post action=/demo/borrar><button>Borrar consultas de prueba</button></form></div></div>`, '/ajustes');
   }));
   app.post('/ajustes', wrap(async (req, res) => {
     const b = req.body, preguntas = {}, minimos = [];
