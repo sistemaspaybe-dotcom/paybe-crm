@@ -136,7 +136,7 @@ function faltanParaCotizar(c, destinos) {
   const ds = (destinos || []).filter(d => !['descartado', 'no_eligio'].includes(d.estado));
   const vacio = v => v == null || String(v).trim() === '';
   return pide.filter(k => k === 'destino' ? !ds.length
-    : k === 'fechas' ? !ds.length || ds.some(d => !(d.desde && d.hasta) && vacio(d.fechas))
+    : k === 'fechas' ? !ds.length || ds.some(d => d.fechas_tipo === 'flexible' ? vacio(d.mes) : d.fechas_tipo === 'fijas' ? !(d.desde && d.hasta) : !(d.desde && d.hasta) && vacio(d.fechas))
     : k === 'dias' ? false // los días los propone la agencia: opcionales
     : k === 'salida' ? vacio(c.salida) && (!ds.length || ds.some(d => vacio(d.salida)))
     : k === 'cuantos' ? vacio(c.cuantos) && !Number(c.adultos)

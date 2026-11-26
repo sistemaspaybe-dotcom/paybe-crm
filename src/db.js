@@ -99,6 +99,8 @@ alter table destinos add column if not exists ciudades jsonb;
 alter table destinos add column if not exists desde date;
 alter table destinos add column if not exists hasta date;
 alter table destinos add column if not exists salida text;
+alter table destinos add column if not exists fechas_tipo text;
+alter table destinos add column if not exists mes text;
 alter table casos add column if not exists adultos int;
 alter table casos add column if not exists menores int;
 `;
