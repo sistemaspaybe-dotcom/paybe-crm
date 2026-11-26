@@ -112,17 +112,14 @@ function rutas(app, { wrap, page, log, ig }) {
     res.redirect('/leads');
   }));
 
-  // ---- contestar desde la ficha (Instagram, dentro de las 24 h) ----
+  // ---- contestar desde la ficha (Instagram o WhatsApp, dentro de las 24 h) ----
   app.post('/caso/:id/responder', wrap(async (req, res) => {
-    const c = await one('select c.id, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [req.params.id]);
     const texto = String(req.body.texto || '').trim();
-    if (!c || !texto || !c.instagram_id) return res.redirect('/caso/' + req.params.id);
-    try {
-      const mid = await ig.enviar(c.instagram_id, texto);
-      await ig.enCola(() => ig.registrar({ igsid: c.instagram_id, mid: mid || 'crm-' + Date.now(), entrante: false, texto, cuando: new Date() }));
-      await log(c.id, req.session.quien, 'Contestó por Instagram desde el CRM.');
-    } catch (e) { await log(c.id, 'CRM', 'No se pudo mandar por Instagram: ' + e.message); }
-    res.redirect('/caso/' + c.id + '#chat');
+    if (texto) {
+      try { const por = await require('./canales').enviar(req.params.id, texto); await log(req.params.id, req.session.quien, 'Contestó por ' + por + ' desde el CRM.'); }
+      catch (e) { await log(req.params.id, 'CRM', 'No se pudo mandar: ' + e.message); }
+    }
+    res.redirect('/caso/' + req.params.id + '#chat');
   }));
 }
 

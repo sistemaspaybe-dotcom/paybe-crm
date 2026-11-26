@@ -9,6 +9,7 @@ const ia = require('./src/ia');
 const { esc, fecha, usd, dinero, layout, chipFase } = require('./src/views');
 const ig = require('./src/instagram');
 const conv = require('./src/conversaciones');
+const wa = require('./src/whatsapp');
 
 const app = express();
 const EQUIPO = ['Patricia', 'Sol', 'Betina'];
@@ -18,6 +19,8 @@ app.use(express.static(__dirname + '/public'));
 // Instagram avisa acá cuando alguien escribe; va antes del login porque lo llama Meta (se valida con la firma)
 app.get('/webhooks/instagram', ig.verificar);
 app.post('/webhooks/instagram', express.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf; } }), ig.recibir);
+// WhatsApp (YCloud) avisa acá; se valida con la firma
+app.post('/webhooks/whatsapp', express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }), (req, res) => wa.recibir(req, res).catch(e => { console.error(e); if (!res.headersSent) res.sendStatus(500); }));
 app.get('/privacidad', (req, res) => res.send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Privacidad · Paybe</title><body style="font:16px/1.6 system-ui;max-width:640px;margin:40px auto;padding:0 20px;color:#1F3A4D"><h1>Política de privacidad</h1><p>Esta es una herramienta interna de Paybe Turismo (EVT 6263, Av. Fleming 1897, Martínez, Buenos Aires) para organizar las consultas de sus clientes.</p><p>Cuando alguien le escribe a Paybe por Instagram, guardamos su nombre de usuario y los mensajes de esa conversación, solo para poder responder la consulta y hacer el seguimiento del viaje. No vendemos ni compartimos esos datos con terceros, y no los usamos para publicidad.</p><p>Si querés que borremos tus datos, escribinos por Instagram a @paybe.turismo o acercate a la oficina y los eliminamos.</p></body>`));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 require('./src/rutas').publica(app, { wrap: f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next) });
@@ -198,6 +201,15 @@ app.get('/instagram', wrap(async (req, res) => {
   ${e.error ? `<tr><td>Último error</td><td style="color:#B84A53">${esc(e.error)}</td></tr>` : ''}</table>
   <form method=post action=/instagram/sincronizar style="margin-top:12px"><button class="p">Traer mensajes ahora</button> ${req.query.r ? `<span class=mut>${esc(req.query.r)}</span>` : ''}</form></div>`, '/instagram');
 }));
+// ---- whatsapp: estado de la conexión ----
+app.get('/whatsapp', wrap(async (req, res) => {
+  const e = await wa.estado(), cuando = d => d ? new Date(d).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }) : '—';
+  page(req, res, 'WhatsApp', `<h1>WhatsApp</h1><p class=mut>Los mensajes que le llegan al número entran solos, y lo que se contesta desde el celular también queda registrado.</p>
+  <div class="card"><table><tr><td>Clave de YCloud (YCLOUD_API_KEY)</td><td>${e.clave ? '✓' : 'Falta'}</td></tr><tr><td>Número conectado</td><td>${esc(e.numero || '—')}</td></tr><tr><td>Aviso de mensajes (webhook)</td><td>${e.webhook ? '✓ ' + esc(e.webhook) : 'Falta'}</td></tr>
+  <tr><td>Mensajes guardados</td><td>${e.mensajes}</td></tr><tr><td>Último mensaje</td><td>${cuando(e.ultimo)}</td></tr><tr><td>Último aviso de YCloud</td><td>${cuando(e.aviso)}</td></tr>${e.error ? `<tr><td>Último error</td><td style="color:#B84A53">${esc(e.error)}</td></tr>` : ''}</table>
+  <form method=post action=/whatsapp/conectar style="margin-top:12px"><button class="p">Volver a conectar</button></form></div>`, '/ajustes');
+}));
+app.post('/whatsapp/conectar', wrap(async (req, res) => { await q("delete from ajustes where clave in ('wa_webhook_url','wa_numero')"); await wa.iniciar(); res.redirect('/whatsapp'); }));
 app.post('/instagram/sincronizar', wrap(async (req, res) => {
   const r = await ig.sincronizar().catch(e => ({ ok: false, motivo: e.message }));
   res.redirect('/instagram?r=' + encodeURIComponent(r.ok ? `Listo: ${r.nuevos} mensajes nuevos.` : 'No se pudo: ' + r.motivo));
@@ -205,6 +217,6 @@ app.post('/instagram/sincronizar', wrap(async (req, res) => {
 
 app.use((e, req, res, next) => { console.error(e); res.status(500).send('Algo salió mal. Probá de nuevo.'); });
 const port = process.env.PORT || 3000;
-db.init().then(reglas.migrar).then(conv.limpiarViejos).then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message));
+db.init().then(reglas.migrar).then(conv.limpiarViejos).then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message)); wa.iniciar().catch(e => console.error('WhatsApp:', e.message));
   const tarea = () => ia.revisarRecordatorios().then(ia.revisarSeguimientos).then(despues.revisar).catch(e => console.error('Recordatorios:', e.message));
   setTimeout(tarea, 30e3); setInterval(tarea, 5 * 60e3).unref(); })).catch(e => { console.error(e); process.exit(1); });

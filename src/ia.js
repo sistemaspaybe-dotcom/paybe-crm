@@ -58,7 +58,7 @@ Devolvé SOLO un JSON con esta forma (null cuando el cliente no lo dijo; no inve
  "destinos": [{"nombre": destino corto (un viaje combinado va como UN destino, ej. "Japón + China"), "fechas": como lo dijo, "dias": número o null, "detalle": qué quiere ver o hacer, "presupuesto_usd": número por persona si es distinto para este destino, o null, "preferencia": true si dijo que este le tira más}],
  "solo_precio": true si pidió solo el precio o dijo que está comparando en varios lados,
  "faltan": [lo que falta de la lista de su tipo],
- "mensaje": ${modoPreguntar ? `un único mensaje para mandarle por Instagram preguntando TODO lo que falta junto, numerado, cálido y cercano, en español rioplatense, sin palabras guarangas, con un emoji como mucho. Saludá por el nombre. No preguntes lo que ya dijo. Si hay varios destinos, aclará que vas a armar una propuesta para cada uno, que las respuestas sirven para todos y que si para alguno tiene algo particular o distinto lo cuente; si son viajes distintos, ordená las preguntas por viaje. Si no sabés si es un viaje combinado o está eligiendo, preguntalo ahí mismo. Si no falta nada, null.` : 'null'}}
+ "mensaje": ${modoPreguntar ? `un único mensaje para mandarle por chat (Instagram o WhatsApp) preguntando TODO lo que falta junto, numerado, cálido y cercano, en español rioplatense, sin palabras guarangas, con un emoji como mucho. Saludá por el nombre. No preguntes lo que ya dijo. Si hay varios destinos, aclará que vas a armar una propuesta para cada uno, que las respuestas sirven para todos y que si para alguno tiene algo particular o distinto lo cuente; si son viajes distintos, ordená las preguntas por viaje. Si no sabés si es un viaje combinado o está eligiendo, preguntalo ahí mismo. Si no falta nada, null.` : 'null'}}
 Ya conocidos: nombre ${JSON.stringify(c.nombre)}${destinosAntes.length ? `, destinos ${JSON.stringify(destinosAntes.map(d => d.nombre))}` : ''}.
 
 <conversacion>
@@ -111,19 +111,19 @@ ${hilo}
 }
 
 // manda las preguntas sola por Instagram, una sola vez por consulta, si está activado en Ajustes,
-// si el equipo todavía no le contestó y si Instagram lo deja (24 h desde su último mensaje). Si no, queda el borrador.
+// si el equipo todavía no le contestó y si el canal lo deja (24 h desde su último mensaje). Si no, queda el borrador.
 const autoActivado = async () => (await one(`select valor from ajustes where clave='auto_preguntas'`))?.valor !== 'no';
 async function mandarSolo(casoId, texto) {
   if (!await autoActivado()) return;
-  const c = await one('select c.*, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [casoId]);
-  if (!c || !c.instagram_id || c.preguntas_en) return;
+  const c = await one('select preguntas_en from casos where id=$1', [casoId]);
+  if (!c || c.preguntas_en) return;
   const ult = await one('select entrante, creado from mensajes where caso_id=$1 order by creado desc limit 1', [casoId]);
   if (!ult || !ult.entrante || Date.now() - new Date(ult.creado) > 23 * 3600e3) return;
-  const ig = require('./instagram');
+  const canales = require('./canales');
+  if (!(await canales.canalDe(casoId))?.puede) return;
   try {
-    const mid = await ig.enviar(c.instagram_id, texto);
-    await ig.enCola(() => ig.registrar({ igsid: c.instagram_id, mid: mid || 'crm-' + Date.now(), entrante: false, texto, cuando: new Date() }));
-    await anotar(casoId, 'La IA le mandó sola las preguntas para cotizar por Instagram.');
+    const por = await canales.enviar(casoId, texto);
+    await anotar(casoId, 'La IA le mandó sola las preguntas para cotizar por ' + por + '.');
   } catch (e) { await anotar(casoId, 'No se pudieron mandar solas las preguntas: ' + e.message + '. Quedó el borrador para mandarlo a mano.'); }
 }
 

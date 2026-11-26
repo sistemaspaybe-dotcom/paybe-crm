@@ -32,3 +32,7 @@ Webhook: `https://<dominio>/webhooks/instagram`, campo `messages`. Estado de la 
 ## Staging
 
 Entorno de prueba en Railway (rama `staging`, base propia). Variable `STAGING=true`: muestra una franja arriba y apaga Instagram (no recibe ni manda nada), aunque tenga las variables de prod. Se prueba con las consultas de prueba (Ajustes). Lo aprobado pasa a `main` → prod.
+
+## WhatsApp (YCloud, coexistencia)
+
+Variables: `YCLOUD_API_KEY` (y opcional `YCLOUD_NUMERO`, `PUBLIC_URL`; si no, usa `RAILWAY_PUBLIC_DOMAIN`). Al arrancar, el CRM crea solo el webhook en YCloud (`/webhooks/whatsapp`, eventos `whatsapp.inbound_message.received` y `whatsapp.smb.message.echoes`) y guarda la clave para validar la firma `YCloud-Signature`. Lo que entra pasa por el mismo filtro que Instagram; lo que Sol contesta desde el celular queda registrado. Las respuestas, las propuestas y las preguntas automáticas salen por el canal por el que escribió el cliente (`src/canales.js`). Estado en `/whatsapp`.

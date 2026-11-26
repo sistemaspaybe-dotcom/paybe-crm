@@ -4,6 +4,7 @@ const { q, one } = require('./db');
 const { FASES, BAJAS, MOTIVOS, ESTADOS_DESTINO, MEDIOS, accionesPara } = require('./flow');
 const { esc, fecha, usd, dinero } = require('./views');
 const ig = require('./instagram');
+const canales = require('./canales');
 const ia = require('./ia');
 const reglas = require('./reglas');
 const demo = require('./demo');
@@ -53,12 +54,12 @@ module.exports = function (app, { wrap, page, log, hace }) {
 
     // borrador de la IA
     const etiquetaBorrador = { preguntas: 'La IA armó un solo mensaje con todo lo que falta', recordatorio: 'No contestó en 20 h: recordatorio (una sola vez)', seguimiento: 'Seguimiento de la cotización', presupuesto_bajo: 'Respuesta estándar: presupuesto bajo', sena: 'La seña no llegó: un solo mensaje', comprobante: 'Pedir el comprobante', saldo: 'Recordatorio del saldo' }[c.borrador_tipo] || 'Borrador';
-    const puedeIG = !!c.instagram_id && ventana;
+    const chat = await canales.canalDe(c.id), puedeIG = !!chat?.puede;
     const borrador = c.borrador ? `<div class="card" style="border:2px solid var(--azul)"><span class="chip">${etiquetaBorrador} · revisalo y mandalo</span>
       <form method=post action=/caso/${c.id}/enviar style="margin-top:10px"><textarea name=texto id=borrador rows=${Math.min(14, 3 + (c.borrador.match(/\n/g) || []).length)}>${esc(c.borrador)}</textarea>
-      <div class="row" style="margin-top:8px">${puedeIG ? `<button class="p" name=como value=ig>Enviar por Instagram</button>` : `<button type=button onclick="navigator.clipboard.writeText(document.getElementById('borrador').value);this.textContent='Copiado ✓'">Copiar</button>${c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : ''}${c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : ''}<button class="g" name=como value=manual>Ya lo mandé</button>`}
+      <div class="row" style="margin-top:8px">${puedeIG ? `<button class="p" name=como value=chat>Enviar por ${chat.nombre}</button>` : `<button type=button onclick="navigator.clipboard.writeText(document.getElementById('borrador').value);this.textContent='Copiado ✓'">Copiar</button>${c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : ''}${c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : ''}<button class="g" name=como value=manual>Ya lo mandé</button>`}
       <button formaction=/caso/${c.id}/borrador/descartar>Lo contesto yo</button></div>
-      ${!puedeIG && c.instagram_id ? '<p class=mut>Pasaron más de 24 h desde su último mensaje: Instagram no deja mandarlo desde el CRM. Copialo y mandalo desde la app.</p>' : ''}</form></div>` : '';
+      ${chat && !chat.ventana ? `<p class=mut>Pasaron más de 24 h desde su último mensaje: ${chat.nombre} no deja mandarlo desde el CRM. Copialo y mandalo desde la app.</p>` : ''}</form></div>` : '';
 
     // qué contestó a la cotización
     const mandadas = cots.filter(k => k.estado === 'mandada');
@@ -93,11 +94,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
       <div class="grid">${ds.map(tarjeta).join('') || '<div class="card mut">Todavía no hay destinos. La IA los crea al leer el chat, o agregalo abajo.</div>'}</div>
       ${c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/destino class="row" style="margin-top:8px"><input name=nombre placeholder="Agregar un destino a esta consulta (ej. Vietnam)" style="max-width:360px" required><button>+ Agregar destino</button></form>` : ''}`;
 
-    // chat de Instagram
+    // chat (Instagram y WhatsApp juntos)
     const igBtn = c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : '';
-    const hilo = msgs.length ? `<div class="card" id=chat><div class="row" style="justify-content:space-between"><h2>Instagram${c.instagram_user ? ` <span class=mut>@${esc(c.instagram_user)}</span>` : ''}</h2>${msgs[msgs.length - 1].entrante ? '<span class="chip op">Sin contestar</span>' : '<span class="chip ve">Contestado</span>'}</div>
-      <div style="display:grid;gap:6px;margin-top:10px;max-height:460px;overflow:auto">${msgs.map(m => `<div style="max-width:78%;padding:8px 12px;border-radius:14px;${m.entrante ? 'background:#F3ECE8;justify-self:start' : 'background:#E3EEF5;justify-self:end'}"><pre>${esc(m.texto)}</pre><div class=mut style="font-size:11px">${m.entrante ? '' : 'Paybe · '}${new Date(m.creado).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}</div></div>`).join('')}</div>
-      ${c.instagram_id && ventana ? `<form method=post action=/caso/${c.id}/responder style="margin-top:10px"><textarea name=texto rows=2 placeholder="Escribí la respuesta" required></textarea><p><button class="p">Enviar por Instagram</button></p></form>` : c.instagram_id ? '<p class=mut style="margin-top:8px">Pasaron más de 24 h desde su último mensaje: Instagram no deja contestar desde el CRM. Contestá desde la app.</p>' : ''}
+    const hilo = msgs.length ? `<div class="card" id=chat><div class="row" style="justify-content:space-between"><h2>Chat${c.instagram_user ? ` <span class=mut>📷 @${esc(c.instagram_user)}</span>` : ''}${c.whatsapp && msgs.some(m => m.canal === 'whatsapp') ? ` <span class=mut>🟢 ${esc(c.whatsapp)}</span>` : ''}</h2>${msgs[msgs.length - 1].entrante ? '<span class="chip op">Sin contestar</span>' : '<span class="chip ve">Contestado</span>'}</div>
+      <div style="display:grid;gap:6px;margin-top:10px;max-height:460px;overflow:auto">${msgs.map(m => `<div style="max-width:78%;padding:8px 12px;border-radius:14px;${m.entrante ? 'background:#F3ECE8;justify-self:start' : 'background:#E3EEF5;justify-self:end'}"><pre>${esc(m.texto)}</pre><div class=mut style="font-size:11px">${m.canal === 'whatsapp' ? '🟢 ' : '📷 '}${m.entrante ? '' : 'Paybe · '}${new Date(m.creado).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}</div></div>`).join('')}</div>
+      ${chat?.puede ? `<form method=post action=/caso/${c.id}/responder style="margin-top:10px"><textarea name=texto rows=2 placeholder="Escribí la respuesta" required></textarea><p><button class="p">Enviar por ${chat.nombre}</button></p></form>` : chat && !chat.ventana ? `<p class=mut style="margin-top:8px">Pasaron más de 24 h desde su último mensaje: ${chat.nombre} no deja contestar desde el CRM. Contestá desde la app.</p>` : ''}
       <div class="row" style="margin-top:8px">${ia.hayIA() && c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/leer><button>Leer el chat de nuevo con la IA</button></form>` : ''}${c.fase === 'lead' && ['nuevo', 'preguntando', 'aguardando'].includes(c.etapa) ? `<form method=post action=/caso/${c.id}/no-es-consulta><button>No es consulta → Filtrados</button></form>` : ''}</div></div>` : '';
 
     const acc = accionesPara(c).map(a => `<form method=post action=/caso/${c.id}/${a.k}>${a.pago ? `<input name=monto placeholder="Monto" inputmode=decimal style="width:120px"> <select name=moneda style="width:90px"><option>USD</option><option>ARS</option></select> <select name=medio style="width:190px">${MEDIOS.map(m => `<option>${m}</option>`).join('')}</select> ` : ''}<button class="g">${esc(a.label)}</button></form>`).join('');
@@ -145,17 +146,16 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const c = await one('select c.*, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [req.params.id]);
     const texto = String(req.body.texto || c.borrador || '').trim();
     if (!texto) return res.redirect('/caso/' + c.id);
-    if (req.body.como === 'ig' && c.instagram_id) {
+    if (req.body.como === 'chat') {
       try {
-        const mid = await ig.enviar(c.instagram_id, texto);
-        await ig.enCola(() => ig.registrar({ igsid: c.instagram_id, mid: mid || 'crm-' + Date.now(), entrante: false, texto, cuando: new Date() }));
-        await log(c.id, req.session.quien, 'Mensaje mandado desde el CRM por Instagram.');
+        const por = await canales.enviar(c.id, texto);
+        await log(c.id, req.session.quien, 'Mensaje mandado desde el CRM por ' + por + '.');
       } catch (e) {
         await q('update casos set borrador=$1 where id=$2', [texto, c.id]);
-        await log(c.id, 'CRM', 'No se pudo mandar por Instagram: ' + e.message);
+        await log(c.id, 'CRM', 'No se pudo mandar: ' + e.message);
         return res.redirect('/caso/' + c.id);
       }
-    } else { // lo mandaron a mano (WhatsApp o la app de Instagram)
+    } else { // lo mandaron a mano desde la app
       if (c.fase === 'lead' && ['nuevo', 'preguntando'].includes(c.etapa)) await q(`update casos set etapa='aguardando', preguntas_en=coalesce(preguntas_en, now()) where id=$1`, [c.id]);
       if (c.borrador_tipo === 'recordatorio') await q('update casos set recordatorio_en=now() where id=$1', [c.id]);
       await log(c.id, req.session.quien, 'Mensaje mandado a mano' + (c.borrador_tipo === 'preguntas' ? '. Pasa a Aguardando datos.' : '.'));
@@ -251,7 +251,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const USOS = { incluido: 'Incluido', opcional: 'Opcional', alternativa: 'Alternativa (interna)' };
     const mon = k.moneda === 'ARS' ? 'ARS' : 'USD';
     const fila = (i, n) => `<tr><td><input name="item_${n}" value="${esc(i.item)}" placeholder="Ítem"><input name="detalle_${n}" value="${esc(i.detalle)}" placeholder="Detalle" style="margin-top:4px;font-size:13px"></td><td><input name="proveedor_${n}" value="${esc(i.proveedor)}"></td><td><input name="costo_${n}" value="${i.costo ?? ''}" inputmode=decimal class=costo style="text-align:right"></td><td><input name="margen_${n}" value="${i.margen ?? ''}" inputmode=decimal class=margen style="text-align:right;width:70px"></td><td><select name="uso_${n}" class=uso style="width:auto">${Object.entries(USOS).map(([v, t]) => `<option value=${v}${(i.uso || 'incluido') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></td><td class=precio style="text-align:right;font-weight:700"></td></tr>`;
-    const ig_ok = !!c.instagram_id && await enVentana(c.id);
+    const chat = await canales.canalDe(c.id), ig_ok = !!chat?.puede;
     page(req, res, 'Cotizar ' + d.nombre, `<div class=mut><a href="/caso/${c.id}">← ${esc(c.nombre)}</a> · ${FASES[c.fase].nombre}</div><h1>${esc(d.nombre)} · cotización v${k.version}</h1>
     <div class="card row" style="gap:24px"><span><span class=mut>Viajan</span><br><b>${esc(c.cuantos || '—')}</b></span><span><span class=mut>Fechas</span><br><b>${esc(d.fechas || '—')}${d.dias ? ' · ' + d.dias + ' días' : ''}</b></span><span><span class=mut>Salen de</span><br><b>${esc(c.salida || '—')}</b></span><span><span class=mut>Presupuesto</span><br><b>${d.presupuesto_usd ? usd(d.presupuesto_usd) + ' pp' : esc(c.presupuesto || '—')}</b></span><span class="chip">⏱ ${hace(k.inicio || k.creada)} cotizando</span></div>
     ${banco.length ? `<div class="card"><h2>Cotizaciones parecidas guardadas</h2><p class=mut>Usá una como base: se copian los ítems y solo actualizás los precios.</p>${banco.map(b => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid #F0E6E1"><span><b>${esc(b.viaje)}</b> <span class=mut>· ${esc(b.nombre || '')} · ${esc(b.cuantos || '')} · ${esc(b.estado)}</span></span><span class=row><b>${dinero(b.precio_pp, b.moneda)} pp</b><a class="btn" href="/destino/${d.id}/cotizar?base=${b.id}">Usar como base</a></span></div>`).join('')}</div>` : ''}
@@ -263,8 +263,8 @@ module.exports = function (app, { wrap, page, log, hace }) {
     <div style="grid-column:1/-1"><label>No incluye (sale en la propuesta)</label><input name=no_incluye value="${esc(k.no_incluye)}"></div></div></div>
     <div class="card" id=resumen><h2>Resumen · por persona</h2><table><tr><td>Costo</td><td id=r_costo style="text-align:right"></td></tr><tr><td>Margen</td><td id=r_margen style="text-align:right"></td></tr><tr><td><b>Precio</b></td><td id=r_precio style="text-align:right;font-size:20px;font-weight:700"></td></tr><tr id=f_opc style="display:none"><td class=mut>Opcionales (aparte)</td><td id=r_opc class=mut style="text-align:right"></td></tr></table>
     <div id=r_presu class="aviso" style="margin-top:8px"></div><div id=r_alerta class="aviso rojo" style="display:none">Margen bajo: menos del 10%. Revisalo antes de mandar.</div><div class=mut id=r_total></div></div></div>
-    <div class="card row"><button name=accion value=guardar>Guardar</button><button name=accion value=ver>Guardar y ver la propuesta</button>${ig_ok ? '<button class="p" name=accion value=mandar_ig>Mandar por Instagram</button>' : ''}<button class="${ig_ok ? '' : 'p'}" name=accion value=mandar_manual>${ig_ok ? 'Ya la mandé por otro lado' : 'Ya la mandé (WhatsApp o la app)'}</button>
-    ${!ig_ok && c.instagram_id ? '<span class=mut>Pasaron más de 24 h desde su último mensaje: Instagram no deja mandarla desde el CRM. Abrí la propuesta, copiá el link y mandalo desde la app.</span>' : ''}</div></form>
+    <div class="card row"><button name=accion value=guardar>Guardar</button><button name=accion value=ver>Guardar y ver la propuesta</button>${ig_ok ? `<button class="p" name=accion value=mandar_chat>Mandar por ${chat.nombre}</button>` : ''}<button class="${ig_ok ? '' : 'p'}" name=accion value=mandar_manual>${ig_ok ? 'Ya la mandé por otro lado' : 'Ya la mandé (WhatsApp o la app)'}</button>
+    ${chat && !chat.ventana ? `<span class=mut>Pasaron más de 24 h desde su último mensaje: ${chat.nombre} no deja mandarla desde el CRM. Abrí la propuesta, copiá el link y mandalo desde la app.</span>` : ''}</div></form>
     <script>
     const presuUSD=${Number(d.presupuesto_usd) || 0};const f=n=>(moneda.value==='ARS'?'$ ':'USD ')+Math.round(n).toLocaleString('es-AR');
     function validez(n){const x=new Date();x.setDate(x.getDate()+n);valida.value=x.toLocaleDateString('en-CA')}
@@ -297,13 +297,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const c = await one('select c.*, p.nombre, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [k.caso_id]);
     const d = await one('select * from destinos where id=$1', [k.destino_id]);
     const link = `${req.protocol}://${req.get('host')}/c/${kk.token}`;
-    if (accion === 'mandar_ig') {
+    if (accion === 'mandar_chat') {
       const nombre = String(c.nombre || '').replace(/^@/, '').split(' ')[0];
       const texto = `¡Hola ${nombre}! Te paso la propuesta para ${d?.nombre || 'tu viaje'} 👇\n${link}\nCualquier duda o si querés ajustar algo, escribinos por acá.`;
-      try {
-        const mid = await ig.enviar(c.instagram_id, texto);
-        await ig.enCola(() => ig.registrar({ igsid: c.instagram_id, mid: mid || 'crm-' + Date.now(), entrante: false, texto, cuando: new Date() }));
-      } catch (e) { await log(c.id, 'CRM', 'No se pudo mandar por Instagram: ' + e.message); return res.redirect(`/destino/${k.destino_id}/cotizar`); }
+      try { await canales.enviar(c.id, texto); }
+      catch (e) { await log(c.id, 'CRM', 'No se pudo mandar la propuesta: ' + e.message); return res.redirect(`/destino/${k.destino_id}/cotizar`); }
     }
     await q(`update cotizaciones set estado='reemplazada' where destino_id=$1 and estado='mandada' and id<>$2`, [k.destino_id, k.id]);
     await q(`update cotizaciones set estado='mandada', enviada_en=now(), mandada=current_date where id=$1`, [k.id]);
@@ -398,6 +396,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     <div class="grid">${Object.entries(reglas.ETIQUETAS_MENSAJES).map(([k, t]) => `<div><label>${esc(t)}</label><textarea name="msg_${k}" rows=6>${esc(M[k])}</textarea></div>`).join('')}</div></div>
     <div class="card"><h2>5 · Bases y condiciones</h2><p class=mut>Salen al final de cada propuesta. Es un primer borrador con lo que dijo Sol: conviene que lo lea antes de usarlo.</p><textarea name=bases rows=6>${esc(bases)}</textarea></div>
     <p><button class="p">Guardar</button> ${req.query.ok ? '<span class=mut>Listo ✓</span>' : ''}</p></form>
+    <div class="card"><h2>Conexiones</h2><p><a href="/instagram">Instagram</a> · <a href="/whatsapp">WhatsApp</a></p></div>
     <div class="card"><h2>Consultas de prueba</h2><p class=mut>Carga 8 consultas de ejemplo (marcadas con 🧪) para mostrar cómo trabaja el CRM: preguntas armadas por la IA, varios destinos, semáforo, cotizaciones y una oportunidad. Los mensajes no salen a Instagram. Volver a cargarlas reemplaza las anteriores.</p>
     <div class="row"><form method=post action=/demo/cargar><button class="p">Cargar consultas de prueba</button></form><form method=post action=/demo/borrar><button>Borrar consultas de prueba</button></form></div></div>`, '/ajustes');
   }));
