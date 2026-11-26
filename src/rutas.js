@@ -43,7 +43,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const ventana = await enVentana(c.id);
 
     // barra de etapas
-    const barra = (lista, actual, previos = []) => `<div class="bar">${previos.map(p => `<div class="ok">${p}</div>`).join('')}${lista.map(([k, n], i) => { const idx = lista.findIndex(([x]) => x === actual); return `<div class="${i < idx ? 'ok' : i === idx ? 'now' : ''}">${n}${i < idx ? ' ✓' : ''}</div>`; }).join('')}</div>`;
+    // cada etapa se puede tocar para pasar el lead a mano (Convertido no: se pasa con "Dijo que sí", que elige la cotización)
+    const barra = (lista, actual, previos = []) => `<style>.bar button.et{all:unset;display:block;width:100%;height:100%;cursor:pointer;text-align:center}.bar>form>div:hover{outline:2px solid var(--coral);outline-offset:-2px}</style><div class="bar">${previos.map(p => `<div class="ok">${p}</div>`).join('')}${lista.map(([k, n], i) => {
+      const idx = lista.findIndex(([x]) => x === actual), cls = i < idx ? 'ok' : i === idx ? 'now' : '', txt = `${n}${i < idx ? ' ✓' : ''}`;
+      return k === actual || k === 'convertido' ? `<div class="${cls}">${txt}</div>` : `<form method=post action=/caso/${c.id}/etapa style="display:contents"><div class="${cls}"><button class=et name=etapa value=${k} title="Pasar a ${esc(n)}">${txt}</button></div></form>`;
+    }).join('')}</div>`;
     let bar = '';
     if (c.fase === 'lead') bar = barra([...Object.entries(FASES.lead.etapas), ['convertido', 'Convertido']], c.etapa);
     else if (c.fase === 'oportunidad') bar = barra(Object.entries(FASES.oportunidad.etapas), c.etapa, ['Lead · Convertido ✓']);
@@ -125,11 +129,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
     ${c.origen === 'Demo' && c.fase === 'lead' && c.etapa === 'aguardando' && !c.borrador ? `<div class="aviso" style="background:#E3EEF5"><span><b>Consulta de prueba.</b> Simulá que el cliente contesta las preguntas para ver qué hace la IA.</span><form method=post action=/demo/${c.id}/responder><button class="p">Simular la respuesta del cliente</button></form></div>` : ''}
     ${c.origen === 'Demo' ? '<div class="mut" style="margin-bottom:8px">🧪 Consulta de prueba: los mensajes no salen a Instagram.</div>' : ''}
-    ${req.query.falta ? '<div class="aviso rojo">Todavía no se puede cotizar: faltan datos. Abajo, en "Lo que vale para toda la consulta", está qué falta.</div>' : ''}${faltaSalida}${recotizando}${borrador}${respuesta}${sena}
+    ${req.query.falta ? '<div class="aviso rojo">Para pasar a Para cotizar primero hay que completar los datos que faltan. Están marcados abajo, en "Lo que vale para toda la consulta".</div>' : ''}${faltaSalida}${recotizando}${borrador}${respuesta}${sena}
     ${acc ? `<div class="card"><div class="row">${acc}</div></div>` : ''}
     ${destinosHtml}
     ${hilo}
-    <div class="grid"><div class="card"><h2>Lo que vale para toda la consulta</h2>${faltaHtml}<form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
+    <div class="grid"><div class="card" id=datos><h2>Lo que vale para toda la consulta</h2>${faltaHtml}<form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
     <div${marca('tipo')}><label>Tipo de consulta${ast('tipo')}</label><select name=servicio>${['', ...Object.keys(reglas.DEFAULTS.preguntas)].map(o => `<option ${o === c.servicio ? 'selected' : ''}>${o}</option>`).join('')}${c.servicio && !Object.keys(reglas.DEFAULTS.preguntas).includes(c.servicio) ? `<option selected>${esc(c.servicio)}</option>` : ''}</select></div>
     <div${marca('cuantos')}><label>Cuántos viajan${ast('cuantos')}</label><input name=cuantos value="${esc(c.cuantos)}"></div><div${marca('salida')}><label>Desde dónde salen${ast('salida')}</label><input name=salida value="${esc(c.salida)}"></div>
     <div${marca('presupuesto')}><label>Presupuesto${ast('presupuesto')}</label><input name=presupuesto value="${esc(c.presupuesto)}"></div><div><label>Cuándo confirma <span class=mut>(opcional)</span></label><input name=confirma value="${esc(c.confirma)}"></div><div><label>Ocasión especial <span class=mut>(opcional)</span></label><input name=ocasion value="${esc(c.ocasion)}" placeholder="Cumpleaños, luna de miel…"></div><div${marca('categoria')}><label>Categoría${ast('categoria')}</label><input name=categoria value="${esc(c.categoria)}" placeholder="Económico o business, tipo de hotel"></div>${c.atendio ? `<div><label>Atendió en la oficina</label><input value="${esc(c.atendio)}" disabled></div>` : ''}${c.fase === 'lead' ? `<input type=hidden name=total value="${c.total ?? ''}"><input type=hidden name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"><input type=hidden name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}">` : `<div><label>Total venta USD</label><input name=total value="${c.total ?? ''}"></div>
@@ -198,6 +202,23 @@ module.exports = function (app, { wrap, page, log, hace }) {
       const j = await r.json(); return j.content?.[0]?.text || null;
     } catch (e) { console.error('IA:', e.message); return null; }
   }
+
+  // ---------- pasar de etapa a mano (tocando la barra) ----------
+  // Para cotizar y lo que sigue piden la ficha completa, igual que cuando avanza solo.
+  app.post('/caso/:id/etapa', wrap(async (req, res) => {
+    const c = await one('select * from casos where id=$1', [req.params.id]); if (!c) return res.redirect('/leads');
+    const etapas = FASES[c.fase]?.etapas || {}, e = req.body.etapa;
+    if (!etapas[e] || e === c.etapa) return res.redirect('/caso/' + c.id);
+    if (c.fase === 'lead') {
+      const orden = Object.keys(FASES.lead.etapas);
+      const ds = await q('select * from destinos where caso_id=$1', [c.id]);
+      if (orden.indexOf(e) >= orden.indexOf('para_cotizar') && reglas.faltanParaCotizar(c, ds).length) return res.redirect(`/caso/${c.id}?falta=1#datos`);
+    }
+    await q('update casos set etapa=$1, actualizado=now() where id=$2', [e, c.id]);
+    await log(c.id, req.session.quien, `Lo pasó a mano de ${etapas[c.etapa] || c.etapa} a ${etapas[e]}.`);
+    if (c.fase === 'lead' && e === 'para_cotizar') await ia.ponerSemaforo(c.id).catch(() => {});
+    res.redirect('/caso/' + c.id);
+  }));
 
   // ---------- destinos ----------
   app.post('/caso/:id/destino', wrap(async (req, res) => {
