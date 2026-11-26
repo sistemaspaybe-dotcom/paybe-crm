@@ -51,7 +51,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     else bar = `<div class="aviso rojo">Perdido${c.baja_desde ? ' (en ' + esc(FASES[c.baja_desde]?.nombre || c.baja_desde) + ')' : ''}: ${esc(c.motivo_baja || '')}</div>`;
 
     // borrador de la IA
-    const etiquetaBorrador = { preguntas: 'La IA armó un solo mensaje con todo lo que falta', recordatorio: 'No contestó en 20 h: recordatorio (una sola vez)', seguimiento: 'Seguimiento de la cotización', presupuesto_bajo: 'Respuesta estándar: presupuesto bajo', sena: 'La seña no llegó: un solo mensaje', comprobante: 'Pedir el comprobante', saldo: 'Recordatorio del saldo' }[c.borrador_tipo] || 'Borrador';
+    const etiquetaBorrador = { preguntas: 'La IA armó un solo mensaje con todo lo que falta', recordatorio: 'No contestó en 20 h: recordatorio (una sola vez)', seguimiento: 'Seguimiento de la cotización', repregunta: 'Contestó una parte: le pedimos lo que falta', presupuesto_bajo: 'Respuesta estándar: presupuesto bajo', sena: 'La seña no llegó: un solo mensaje', comprobante: 'Pedir el comprobante', saldo: 'Recordatorio del saldo' }[c.borrador_tipo] || 'Borrador';
     const chat = await canales.canalDe(c.id), puedeIG = !!chat?.puede;
     const borrador = c.borrador ? `<div class="card" style="border:2px solid var(--azul)"><span class="chip">${etiquetaBorrador} · revisalo y mandalo</span>
       <form method=post action=/caso/${c.id}/enviar style="margin-top:10px"><textarea name=texto id=borrador rows=${Math.min(14, 3 + (c.borrador.match(/\n/g) || []).length)}>${esc(c.borrador)}</textarea>

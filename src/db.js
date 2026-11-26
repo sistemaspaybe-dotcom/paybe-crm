@@ -94,6 +94,7 @@ alter table pagos add column if not exists moneda text default 'USD';
 alter table pagos add column if not exists comprobante boolean default true;
 alter table personas add column if not exists personal boolean default false;
 alter table conversaciones add column if not exists motivo text;
+alter table casos add column if not exists repreguntas int default 0;
 `;
 // cambios de etapas de una sola vez (17/11): Mandada pasa a Esperando respuesta; el viejo Preguntando (ya contestaron) es Aguardando datos
 async function migrar() {

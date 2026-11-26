@@ -85,8 +85,9 @@ async function registrar({ igsid, username, nombre, mid, entrante, texto, cuando
   const anotar = texto => q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [c.id, 'Instagram', texto]);
   if (!entrante && c.fase === 'lead' && ['nuevo', 'preguntando'].includes(c.etapa) && conv.preguntoAlgo(texto, c)) { // les mandaron las preguntas (desde el CRM o desde Instagram)
     await q(`update casos set etapa='aguardando', borrador=null, borrador_tipo=null, preguntas_en=coalesce(preguntas_en, now()) where id=$1`, [c.id]); await anotar('Le pidieron los datos por Instagram. Pasa a Aguardando datos.');
-  } else if (!entrante && c.fase === 'lead' && c.etapa === 'aguardando' && c.borrador_tipo === 'recordatorio') {
-    await q(`update casos set borrador=null, borrador_tipo=null, recordatorio_en=now() where id=$1`, [c.id]); await anotar('Se mandó el recordatorio.');
+  } else if (!entrante && c.fase === 'lead' && c.etapa === 'aguardando' && ['recordatorio', 'repregunta'].includes(c.borrador_tipo)) {
+    const rec = c.borrador_tipo === 'recordatorio';
+    await q(`update casos set borrador=null, borrador_tipo=null${rec ? ', recordatorio_en=now()' : ''} where id=$1`, [c.id]); await anotar(rec ? 'Se mandó el recordatorio.' : 'Se le pidió lo que faltaba.');
   } else if (!entrante && ultimo?.entrante) await anotar('Le contestaron por Instagram.');
   if (entrante && c.fase === 'lead' && ['nuevo', 'preguntando', 'aguardando', 'para_cotizar'].includes(c.etapa)) ia.programar(c.id);
   return true;

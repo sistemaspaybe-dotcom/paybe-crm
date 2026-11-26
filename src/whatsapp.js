@@ -57,8 +57,9 @@ async function registrar({ tel, nombre, mid, entrante, texto, cuando }) {
   if (!entrante && c.fase === 'lead' && ['nuevo', 'preguntando'].includes(c.etapa) && conv.preguntoAlgo(texto, c)) {
     await q(`update casos set etapa='aguardando', borrador=null, borrador_tipo=null, preguntas_en=coalesce(preguntas_en, now()) where id=$1`, [c.id]);
     await anotar('Le pidieron los datos por WhatsApp. Pasa a Aguardando datos.');
-  } else if (!entrante && c.fase === 'lead' && c.etapa === 'aguardando' && c.borrador_tipo === 'recordatorio') {
-    await q(`update casos set borrador=null, borrador_tipo=null, recordatorio_en=now() where id=$1`, [c.id]); await anotar('Se mandó el recordatorio.');
+  } else if (!entrante && c.fase === 'lead' && c.etapa === 'aguardando' && ['recordatorio', 'repregunta'].includes(c.borrador_tipo)) {
+    const rec = c.borrador_tipo === 'recordatorio';
+    await q(`update casos set borrador=null, borrador_tipo=null${rec ? ', recordatorio_en=now()' : ''} where id=$1`, [c.id]); await anotar(rec ? 'Se mandó el recordatorio.' : 'Se le pidió lo que faltaba.');
   }
   if (entrante && c.fase === 'lead' && ['nuevo', 'preguntando', 'aguardando', 'para_cotizar'].includes(c.etapa)) ia().programar(c.id);
   return true;
