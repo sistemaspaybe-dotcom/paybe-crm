@@ -100,20 +100,25 @@ module.exports = function (app, { wrap, page, log, hace }) {
       <div class="row" style="margin-top:8px">${ia.hayIA() && c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/leer><button>Leer el chat de nuevo con la IA</button></form>` : ''}</div></div>` : '';
 
     const acc = accionesPara(c).map(a => `<form method=post action=/caso/${c.id}/${a.k}>${a.pago ? `<input name=monto placeholder="Monto" inputmode=decimal style="width:120px"> <select name=moneda style="width:90px"><option>USD</option><option>ARS</option></select> <select name=medio style="width:190px">${MEDIOS.map(m => `<option>${m}</option>`).join('')}</select> ` : ''}<button class="g">${esc(a.label)}</button></form>`).join('');
-    const baja = BAJAS[c.fase] && !(c.fase === 'lead' && c.etapa === 'esperando') ? `<form method=post action=/caso/${c.id}/baja class="row"><select name=motivo style="width:230px">${MOTIVOS.map(m => `<option>${m}</option>`).join('')}</select><button>${BAJAS[c.fase]}</button></form>` : '';
+    // Perdido: arriba, al lado de Filtrar, con el motivo
+    const baja = BAJAS[c.fase] ? `<details style="position:relative"><summary class="btn" style="list-style:none;cursor:pointer">Perdido ▾</summary>
+      <form method=post action=/caso/${c.id}/baja style="position:absolute;right:0;top:calc(100% + 6px);z-index:5;background:#fff;border:1px solid var(--linea);border-radius:12px;padding:8px;display:grid;gap:6px;min-width:260px;box-shadow:0 6px 20px rgba(31,58,77,.12)">
+      <span class=mut style="padding:2px 6px">Era una consulta pero no avanzó. ¿Por qué?</span>
+      ${MOTIVOS.map(m => `<button name=motivo value="${esc(m)}" style="text-align:left">${esc(m)}</button>`).join('')}
+      <span class=mut style="padding:2px 6px;font-size:12px">Cuenta en la conversión. Si no era una consulta, usá Filtrar.</span></form></details>` : '';
     const wa = c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : '';
     const sena = c.fase === 'oportunidad' ? (() => { const k = cots.find(x => x.estado === 'aceptada'); return k ? `<div class="card"><h2>Seña</h2><p>${esc(nombreDest(k.destino_id))} · v${k.version} · ${dinero(k.precio_pp, k.moneda)} por persona. Seña ${k.sena_pct ?? 50}%: <b>${dinero(plata(k.precio_pp * (k.sena_pct ?? 50) / 100), k.moneda)} por persona</b>${k.valida_hasta ? ` · tarifa válida hasta ${fecha(k.valida_hasta)}` : ''}.</p><p class=mut>${c.etapa === 'falta_sena' ? (c.sena_seguimiento_en ? 'Ya se le mandó el mensaje. Si no contesta en 3 días, pasa a Perdido.' : `Si en 3 días no llega la seña, se arma un solo mensaje para preguntarle si sigue${c.datos_sena_en ? ' (' + fecha(new Date(new Date(c.datos_sena_en).getTime() + 3 * 864e5)) + ')' : ''}.`) : 'Cuando le mandes los datos, tocá "Ya le mandé los datos de la seña".'}</p></div>` : ''; })() : '';
     const faltaSalida = c.fase === 'venta' && !c.sale && ['reservando', 'saldo'].includes(c.etapa) ? '<div class="aviso">Cargá la fecha de salida (abajo, en "Sale") para que lleguen solos los avisos del saldo, 2 meses y 1 mes antes.</div>' : '';
     const recotizando = c.fase === 'lead' && c.etapa === 'recotizar' ? '<div class="aviso">↻ Confirmó, pero cambió el precio: cargá la tarifa nueva en el cotizador y la fecha de validez, y mandala.</div>' : '';
 
-    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}
+    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}
     ${otras.length ? `<div class="aviso">Esta persona tiene ${otras.length} consulta${otras.length > 1 ? 's' : ''} más abierta${otras.length > 1 ? 's' : ''}: ${otras.map(o => `<a href="/caso/${o.id}">${esc(o.destino || 'consulta')} (${esc(FASES[o.fase].etapas[o.etapa] || o.etapa)})</a>`).join(', ')}</div>` : ''}
     ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
     ${c.origen === 'Demo' && c.fase === 'lead' && c.etapa === 'aguardando' && !c.borrador ? `<div class="aviso" style="background:#E3EEF5"><span><b>Consulta de prueba.</b> Simulá que el cliente contesta las preguntas para ver qué hace la IA.</span><form method=post action=/demo/${c.id}/responder><button class="p">Simular la respuesta del cliente</button></form></div>` : ''}
     ${c.origen === 'Demo' ? '<div class="mut" style="margin-bottom:8px">🧪 Consulta de prueba: los mensajes no salen a Instagram.</div>' : ''}
     ${faltaSalida}${recotizando}${borrador}${respuesta}${sena}
-    ${acc || baja ? `<div class="card"><div class="row">${acc}${baja}</div></div>` : ''}
+    ${acc ? `<div class="card"><div class="row">${acc}</div></div>` : ''}
     ${destinosHtml}
     ${hilo}
     <div class="grid"><div class="card"><h2>Lo que vale para toda la consulta</h2><form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
@@ -211,7 +216,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
   app.post('/caso/:id/nueva-consulta', wrap(async (req, res) => {
     const c = await one('select * from casos where id=$1', [req.params.id]);
     const n = await one(`insert into casos(persona_id,cuantos,salida,viene_de) values($1,$2,$3,$4) returning id`, [c.persona_id, c.cuantos, c.salida, c.id]);
-    await log(n.id, req.session.quien, `Consulta nueva de la misma persona (viene de la consulta ${c.id}).`);
+    // lo que el cliente escribió desde la última respuesta del equipo es el pedido del viaje nuevo: pasa a la consulta nueva
+    const ultResp = await one('select max(creado) m from mensajes where caso_id=$1 and not entrante', [c.id]);
+    const movidos = await q(`update mensajes set caso_id=$1 where caso_id=$2 and entrante and creado > coalesce($3, '-infinity'::timestamptz) and creado > now() - interval '7 days' returning id`, [n.id, c.id, ultResp?.m || null]);
+    await log(n.id, req.session.quien, `Consulta nueva de la misma persona (viene de la consulta ${c.id}).${movidos.length ? ` Se trajeron ${movidos.length} mensaje${movidos.length > 1 ? 's' : ''} sobre este viaje.` : ''} Lo que escriba de ahora en más entra acá.`);
+    if (movidos.length) ia.programar(n.id);
     res.redirect('/caso/' + n.id);
   }));
 
