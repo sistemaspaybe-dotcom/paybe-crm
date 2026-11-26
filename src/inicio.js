@@ -29,6 +29,22 @@ const CSS = `<style>
 .av .q{flex:1;min-width:0}.av .acc{display:flex;gap:6px}.av button{padding:5px 10px;font-size:12px}
 .dia{min-width:46px;text-align:center;border-radius:10px;padding:4px 0;font-weight:700;font-size:12px;line-height:1.1;background:#F3ECE9;color:#5A6670}
 .dia.rojo{background:#FBE4E7;color:#B84A53}.dia.hoy{background:#FFF3D6;color:#8A5A00}.dia b{display:block;font-size:17px}
+.hola2{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:6px}.hola2 span{color:#5A6670;font-size:17px}
+.res{color:#5A6670;margin:0 0 18px}
+.anillos{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+.an{background:#fff;border:1px solid var(--linea);border-radius:18px;padding:20px 24px}
+.an .tit{display:flex;align-items:center;gap:10px}.an .tit h2{font:700 20px Figtree,system-ui}
+.an .ico{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:16px;background:var(--c);color:#fff}
+.an .bajada{color:#5A6670;margin:4px 0 14px}
+.an .cuerpo{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:24px}
+.dona{position:relative;width:150px;height:150px;flex:none}.dona svg{transform:rotate(-90deg)}
+.dona .cen{position:absolute;inset:0;display:grid;place-content:center;text-align:center}.dona .cen b{font:700 38px/1 Figtree,system-ui}.dona .cen span{font-size:13px;color:#5A6670;margin-top:4px}
+.pills{display:grid;gap:8px;justify-items:start}
+.pill{display:inline-flex;align-items:baseline;gap:8px;line-height:1.3;padding:7px 14px;border-radius:10px;font-size:15px;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff)}
+.pill::before{content:'';width:9px;height:9px;border-radius:50%;background:var(--c);flex:none;align-self:center}.pill b{font-weight:800}.pill.cero{opacity:.45}
+.pill:hover{background:color-mix(in srgb,var(--c) 20%,#fff)}
+.pill{font-size:14px}
+@media (max-width:900px){.anillos{grid-template-columns:1fr}.an .cuerpo{grid-template-columns:120px 1fr;gap:16px}.dona{width:120px;height:120px}.dona svg{width:120px;height:120px}.dona .cen b{font-size:30px}}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.cols,.dos{grid-template-columns:1fr}.embudo{overflow-x:auto;padding-bottom:4px}.embudo a{flex:0 0 76px;font-size:11px}.fases{display:none}.kpi .n{font-size:28px}}
 </style>`;
 
@@ -41,6 +57,17 @@ const destinos = ds => (ds || []).filter(d => d && d.nombre).map(d => `<span cla
 const hoyAR = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 const COLOR = { lead: ['#E3EEF5', '#2B5C7A'], oportunidad: ['#FBE9E6', '#B84A53'], venta: ['#E0F0E6', '#1E5A3A'] };
 const RUTA = { lead: '/leads', oportunidad: '/oportunidades', venta: '/ventas' };
+
+// anillo con un tramo por cada estado, y el total en el centro
+function dona(segs, centro, etiqueta) {
+  segs = segs.filter(x => !x.fuera);
+  const r = 62, C = 2 * Math.PI * r, tot = segs.reduce((a, x) => a + x.n, 0), gap = segs.filter(x => x.n).length > 1 ? 4 : 0;
+  let off = 0;
+  const arcos = tot ? segs.filter(x => x.n).map(x => { const l = C * x.n / tot; const a = `<circle cx=75 cy=75 r=${r} fill=none stroke="${x.c}" stroke-width="24" stroke-dasharray="${Math.max(l - gap, 1)} ${C}" stroke-dashoffset="${-off}"/>`; off += l; return a; }).join('') : '';
+  return `<div class="dona"><svg viewBox="0 0 150 150" width=150 height=150><circle cx=75 cy=75 r=${r} fill=none stroke="#F3ECE9" stroke-width="24"/>${arcos}</svg><div class="cen"><b>${centro}</b><span>${etiqueta}</span></div></div>`;
+}
+const pills = (segs, href) => `<div class="pills">${segs.map(x => `<a class="pill ${x.n ? '' : 'cero'}" style="--c:${x.c}" href="${x.href || href}"><b>${x.n}</b> ${x.t}</a>`).join('')}</div>`;
+const tarjeta = (color, ico, titulo, bajada, segs, centro, etiqueta, href) => `<section class="an" style="--c:${color}"><div class="tit"><span class="ico">${ico}</span><h2>${titulo}</h2></div><p class="bajada">${bajada}</p><div class="cuerpo">${dona(segs, centro, etiqueta)}${pills(segs, href)}</div></section>`;
 
 module.exports = (app, { wrap, page }) => {
   app.get('/', wrap(async (req, res) => {
@@ -74,17 +101,30 @@ module.exports = (app, { wrap, page }) => {
     const fechaLarga = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Argentina/Buenos_Aires' });
     const pendientes = chats.length + cotizar.length + cobrar.length;
     const resumen = pendientes ? `Hay ${pendientes} cosas para mover hoy${chatsViejos ? `; ${chatsViejos === 1 ? '1 chat espera' : chatsViejos + ' chats esperan'} hace más de un día` : ''}.` : 'Está todo al día. 🙌';
-    const kpi = (c, num, t, s, href) => `<a class="kpi" href="${href}" style="--c:${c}"><div class="n">${num}</div><div class="t">${t}</div><div class="s">${s}</div></a>`;
-    const kpis = `<div class="kpis">
-      ${kpi('#B84A53', chats.length, 'Para contestar', chatsViejos ? `${chatsViejos} hace más de 1 día` : 'chats que esperan respuesta', '#contestar')}
-      ${kpi('#2B5C7A', cotizar.length, 'Para cotizar o mandar', `${cotizar.filter(c => c.borrador).length} mensajes listos · ${n('lead', 'cotizando')} cotizándose`, '#cotizar')}
-      ${kpi('#8A5A00', n('lead', 'esperando'), 'Esperando al cliente', 'cotizaciones mandadas', '/leads')}
-      ${kpi('#1E5A3A', porCobrar ? usd(Math.round(porCobrar)) : n('oportunidad') + n('venta', 'saldo'), 'Por cobrar', `${n('oportunidad', ['le_intereso', 'falta_sena'])} seña${n('oportunidad', ['le_intereso', 'falta_sena']) === 1 ? '' : 's'} y ${n('venta', 'saldo')} saldo${n('venta', 'saldo') === 1 ? '' : 's'}`, '#cobrar')}
+    const R = '#C24B55', A = '#B7791F', AZ = '#2B5C7A', V = '#2F7A50', G = '#8A97A3';
+    const mChats = chats.map(m => minDesde(m.ult_en));
+    const hoyAv = avisos.filter(a => String(a.para.toISOString?.().slice(0, 10) || a.para) === hoy).length;
+    const anillos = `<div class="anillos">
+      ${tarjeta(R, '💬', 'Chats', 'Mensajes de clientes que esperan respuesta', [
+        { n: mChats.filter(x => x > 1440).length, t: 'esperan hace más de 1 día', c: R },
+        { n: mChats.filter(x => x > 120 && x <= 1440).length, t: 'esperan hace más de 2 h', c: A },
+        { n: mChats.filter(x => x <= 120).length, t: 'recién llegados', c: AZ }], chats.length, 'sin contestar', '#contestar')}
+      ${tarjeta(AZ, '✈️', 'Cotizaciones', 'Lo que hay que cotizar o mandarle al cliente', [
+        { n: cotizar.filter(c => c.borrador).length, t: 'mensajes listos para mandar', c: R },
+        { n: cotizar.filter(c => !c.borrador && c.etapa === 'para_cotizar').length, t: 'para cotizar', c: AZ },
+        { n: cotizar.filter(c => !c.borrador && c.etapa === 'recotizar').length, t: 'para recotizar', c: A },
+        { n: cotizar.filter(c => !c.borrador && c.etapa === 'cotizando').length, t: 'cotizándose ahora', c: G },
+        { n: n('lead', 'esperando'), t: 'esperando respuesta del cliente', c: V, href: '/leads', fuera: true }], cotizar.length, 'para hacer', '#cotizar')}
+      ${tarjeta(V, '💰', 'Cobros', porCobrar ? usd(Math.round(porCobrar)) + ' por cobrar entre señas y saldos' : 'Señas y saldos pendientes', [
+        { n: n('oportunidad', 'le_intereso'), t: 'mandar datos de la seña', c: R },
+        { n: n('oportunidad', 'falta_sena'), t: 'falta la seña', c: A },
+        { n: n('oportunidad', 'sena_pagada'), t: 'seña pagada: pasar a Venta', c: AZ },
+        { n: n('venta', 'saldo'), t: 'falta el saldo', c: V }], n('oportunidad') + n('venta', 'saldo'), 'por cobrar', '#cobrar')}
+      ${tarjeta(A, '🔔', 'Recordatorios', `${salidas.length ? salidas.length + ' salida' + (salidas.length > 1 ? 's' : '') + ' en los próximos 30 días' : 'Avisos que dejó el equipo o el sistema'}`, [
+        { n: vencidos, t: 'vencidos', c: R },
+        { n: hoyAv, t: 'para hoy', c: A },
+        { n: avisos.length - vencidos - hoyAv, t: 'próximos', c: AZ }], vencidos + hoyAv, 'para hoy', '#recordatorios')}
     </div>`;
-
-    // ---- embudo: cuántos hay en cada etapa, tocás y vas a la lista ----
-    const embudo = `<div class="card" style="padding:14px 16px"><div class="fases">${['lead', 'oportunidad', 'venta'].map(f => `<span style="flex:${Object.keys(FASES[f].etapas).length}">${FASES[f].nombre}s · ${n(f)}</span>`).join('')}</div>
-      <div class="embudo">${['lead', 'oportunidad', 'venta'].flatMap(f => Object.entries(FASES[f].etapas).map(([e, t]) => { const k = n(f, e); return `<a href="${RUTA[f]}" class="${k ? '' : 'cero'}" style="background:${COLOR[f][0]};color:${COLOR[f][1]}" title="${esc(t)}"><b>${k}</b>${esc(t)}</a>`; })).join('')}</div></div>`;
 
     // ---- columna 1: contestar ----
     const colChats = chats.map(m => `<div class="it"><div class="top"><b>${conv.icono(m.canal)} ${esc(m.nombre)}</b>${tiempo(m.ult_en)}</div>
@@ -135,11 +175,12 @@ module.exports = (app, { wrap, page }) => {
     };
     const itSal = s => { const d = Math.ceil((new Date(s.sale) - new Date(hoy)) / 864e5); return `<div class="av"><div class="dia ${d <= 7 ? 'hoy' : ''}"><b>${d}</b>días</div><div class="q"><a href="/caso/${s.id}"><b>${esc(s.nombre)}</b></a><div class="mut">${(s.dests || []).map(x => esc(x.nombre)).join(' + ') || esc(s.destino || '')} · sale el ${fecha(s.sale)}</div></div></div>`; };
     const abajo = `<div class="dos">
-      <section class="col"><h2>🔔 Recordatorios${vencidos ? `<span class="num" style="background:#B84A53">${vencidos} vencido${vencidos > 1 ? 's' : ''}</span>` : ''}</h2>${avisos.map(itAv).join('') || '<div class="vacio">No hay recordatorios. ✓</div>'}</section>
+      <section class="col" id="recordatorios"><h2>🔔 Recordatorios${vencidos ? `<span class="num" style="background:#B84A53">${vencidos} vencido${vencidos > 1 ? 's' : ''}</span>` : ''}</h2>${avisos.map(itAv).join('') || '<div class="vacio">No hay recordatorios. ✓</div>'}</section>
       <section class="col"><h2>🧳 Próximas salidas</h2>${salidas.map(itSal).join('') || '<div class="vacio">Nadie sale en los próximos 30 días.</div>'}</section></div>`;
 
-    page(req, res, 'Inicio', `${CSS}<div class="hola"><div><h1>${quien ? 'Hola, ' + esc(quien) : 'Lo de hoy'}</h1><p>${fechaLarga.charAt(0).toUpperCase() + fechaLarga.slice(1)} · ${resumen}</p></div></div>
-      ${kpis}${embudo}${cols}${abajo}`, '/');
+    const fechaAnio = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Argentina/Buenos_Aires' }).replace(',', '');
+    page(req, res, 'Inicio', `${CSS}<div class="hola2"><h1>${quien ? 'Hola, ' + esc(quien) : 'Hola'}</h1><span>${fechaAnio.charAt(0).toUpperCase() + fechaAnio.slice(1)}</span></div><p class="res">${resumen}</p>
+      ${anillos}${cols}${abajo}`, '/');
   }));
   // pasar un recordatorio a mañana
   app.post('/aviso/:id/posponer', wrap(async (req, res) => {
