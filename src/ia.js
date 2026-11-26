@@ -139,7 +139,8 @@ async function ponerSemaforo(casoId, R) {
     const r = reglas.evaluar(d, ctx, R);
     if (r.semaforo !== d.semaforo || r.motivo !== d.motivo) await q(`update destinos set semaforo=$1, motivo=$2, estado='semaforo' where id=$3`, [r.semaforo, r.motivo, d.id]);
   }
-  if (ds.length && ['nuevo', 'preguntando', 'aguardando'].includes(c.etapa)) {
+  const faltan = reglas.faltanParaCotizar(c, await q('select * from destinos where caso_id=$1', [casoId]));
+  if (ds.length && ['nuevo', 'preguntando', 'aguardando'].includes(c.etapa) && !faltan.length) {
     await q(`update casos set etapa='para_cotizar', borrador=null, borrador_tipo=null, actualizado=now() where id=$1`, [c.id]);
     const col = await q('select nombre, semaforo from destinos where caso_id=$1 and semaforo is not null order by id', [c.id]);
     await anotar(c.id, 'Semáforo: ' + col.map(x => `${x.nombre} ${{ verde: '🟢', amarillo: '🟡', rojo: '🔴' }[x.semaforo]}`).join(', ') + '. Pasa a Para cotizar.');

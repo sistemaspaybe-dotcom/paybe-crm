@@ -88,6 +88,14 @@ module.exports = function (app, { wrap, page, log, hace }) {
         <div><label>Destino</label><input name=nombre value="${esc(d.nombre)}"></div><div><label>Fechas</label><input name=fechas value="${esc(d.fechas)}"></div><div><label>Días</label><input name=dias value="${d.dias ?? ''}"></div>
         <div><label>Presupuesto USD por persona</label><input name=presupuesto_usd value="${d.presupuesto_usd ?? ''}"></div><div style="grid-column:1/-1"><label>Qué busca</label><input name=detalle value="${esc(d.detalle)}"></div><div><button class="p">Guardar y recalcular semáforo</button></div></form></details></div></div>`;
     };
+    // lo que falta para poder cotizar (fechas y días van en cada destino)
+    const faltan = c.fase === 'lead' ? reglas.faltanParaCotizar(c, ds) : [];
+    const pide = c.fase === 'lead' ? (reglas.NECESARIOS[c.servicio] || reglas.NECESARIOS['Viaje a medida']).concat('tipo') : [];
+    const marca = k => faltan.includes(k) ? ' class=falta' : '';
+    const ast = k => pide.includes(k) ? ' *' : '';
+    const faltaHtml = c.fase !== 'lead' ? '' : faltan.length
+      ? `<style>.falta input,.falta select{border-color:#D8626B;background:#FFF1F1}</style><div class="aviso rojo" style="margin:8px 0">Para cotizar falta: <b>${faltan.map(k => reglas.NOMBRE_DATO[k]).join(', ')}</b>.${faltan.some(k => ['destino', 'fechas', 'dias'].includes(k)) ? ' Destino, fechas y días se cargan en cada destino, arriba.' : ''} Hasta que esté todo no pasa a Para cotizar.</div>`
+      : '<div class="aviso" style="margin:8px 0">✓ Está todo lo necesario para cotizar.</div>';
     const destinosHtml = `<div class="row" style="justify-content:space-between;margin:18px 0 8px"><h2>Destinos de esta consulta</h2>${c.tipo_destinos && ds.length > 1 ? `<span class=mut>${esc({ combinado: 'Un viaje que combina destinos', opciones: 'Está eligiendo entre destinos', distintos: 'Son viajes distintos', uno: '' }[c.tipo_destinos] || '')}</span>` : ''}</div>
       <div class="grid">${ds.map(tarjeta).join('') || '<div class="card mut">Todavía no hay destinos. La IA los crea al leer el chat, o agregalo abajo.</div>'}</div>
       ${c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/destino class="row" style="margin-top:8px"><input name=nombre placeholder="Agregar un destino a esta consulta (ej. Vietnam)" style="max-width:360px" required><button>+ Agregar destino</button></form>` : ''}`;
@@ -117,15 +125,15 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
     ${c.origen === 'Demo' && c.fase === 'lead' && c.etapa === 'aguardando' && !c.borrador ? `<div class="aviso" style="background:#E3EEF5"><span><b>Consulta de prueba.</b> Simulá que el cliente contesta las preguntas para ver qué hace la IA.</span><form method=post action=/demo/${c.id}/responder><button class="p">Simular la respuesta del cliente</button></form></div>` : ''}
     ${c.origen === 'Demo' ? '<div class="mut" style="margin-bottom:8px">🧪 Consulta de prueba: los mensajes no salen a Instagram.</div>' : ''}
-    ${faltaSalida}${recotizando}${borrador}${respuesta}${sena}
+    ${req.query.falta ? '<div class="aviso rojo">Todavía no se puede cotizar: faltan datos. Abajo, en "Lo que vale para toda la consulta", está qué falta.</div>' : ''}${faltaSalida}${recotizando}${borrador}${respuesta}${sena}
     ${acc ? `<div class="card"><div class="row">${acc}</div></div>` : ''}
     ${destinosHtml}
     ${hilo}
-    <div class="grid"><div class="card"><h2>Lo que vale para toda la consulta</h2><form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
-    <div><label>Tipo de consulta</label><select name=servicio>${['', ...Object.keys(reglas.DEFAULTS.preguntas)].map(o => `<option ${o === c.servicio ? 'selected' : ''}>${o}</option>`).join('')}${c.servicio && !Object.keys(reglas.DEFAULTS.preguntas).includes(c.servicio) ? `<option selected>${esc(c.servicio)}</option>` : ''}</select></div>
-    <div><label>Cuántos viajan</label><input name=cuantos value="${esc(c.cuantos)}"></div><div><label>Desde dónde salen</label><input name=salida value="${esc(c.salida)}"></div>
-    <div><label>Presupuesto</label><input name=presupuesto value="${esc(c.presupuesto)}"></div><div><label>Cuándo confirma</label><input name=confirma value="${esc(c.confirma)}"></div><div><label>Ocasión especial</label><input name=ocasion value="${esc(c.ocasion)}" placeholder="Cumpleaños, luna de miel…"></div><div><label>Categoría</label><input name=categoria value="${esc(c.categoria)}" placeholder="Económico o business, tipo de hotel"></div>${c.atendio ? `<div><label>Atendió en la oficina</label><input value="${esc(c.atendio)}" disabled></div>` : ''}<div><label>Total venta USD</label><input name=total value="${c.total ?? ''}"></div>
-    <div><label>Sale</label><input type=date name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"></div><div><label>Vuelve</label><input type=date name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}"></div>
+    <div class="grid"><div class="card"><h2>Lo que vale para toda la consulta</h2>${faltaHtml}<form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
+    <div${marca('tipo')}><label>Tipo de consulta${ast('tipo')}</label><select name=servicio>${['', ...Object.keys(reglas.DEFAULTS.preguntas)].map(o => `<option ${o === c.servicio ? 'selected' : ''}>${o}</option>`).join('')}${c.servicio && !Object.keys(reglas.DEFAULTS.preguntas).includes(c.servicio) ? `<option selected>${esc(c.servicio)}</option>` : ''}</select></div>
+    <div${marca('cuantos')}><label>Cuántos viajan${ast('cuantos')}</label><input name=cuantos value="${esc(c.cuantos)}"></div><div${marca('salida')}><label>Desde dónde salen${ast('salida')}</label><input name=salida value="${esc(c.salida)}"></div>
+    <div${marca('presupuesto')}><label>Presupuesto${ast('presupuesto')}</label><input name=presupuesto value="${esc(c.presupuesto)}"></div><div><label>Cuándo confirma <span class=mut>(opcional)</span></label><input name=confirma value="${esc(c.confirma)}"></div><div><label>Ocasión especial <span class=mut>(opcional)</span></label><input name=ocasion value="${esc(c.ocasion)}" placeholder="Cumpleaños, luna de miel…"></div><div${marca('categoria')}><label>Categoría${ast('categoria')}</label><input name=categoria value="${esc(c.categoria)}" placeholder="Económico o business, tipo de hotel"></div>${c.atendio ? `<div><label>Atendió en la oficina</label><input value="${esc(c.atendio)}" disabled></div>` : ''}${c.fase === 'lead' ? `<input type=hidden name=total value="${c.total ?? ''}"><input type=hidden name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"><input type=hidden name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}">` : `<div><label>Total venta USD</label><input name=total value="${c.total ?? ''}"></div>
+    <div><label>Sale</label><input type=date name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"></div><div><label>Vuelve</label><input type=date name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}"></div>`}
     <div style="grid-column:1/-1"><button class="p">Guardar</button></div></form></div>
     <div class="card"><h2>Recordame</h2><form method=post action=/caso/${c.id}/aviso class="f" style="margin-top:8px"><div><label>Cuándo</label><input type=date name=para required value="${new Date(Date.now() + 864e5 * 2).toISOString().slice(0, 10)}"></div><div><label>Qué</label><input name=texto required placeholder="Chequear si contestó"></div><div><button>Crear aviso</button></div></form></div></div>
     ${chats.length ? `<div class="card"><h2>Chats pegados antes</h2>${chats.map(h => `<div class="card" style="background:#FFF8F6"><b>${fecha(h.creado)}</b><pre>${esc(h.resumen || '(sin resumen: falta la clave de IA)')}</pre></div>`).join('')}</div>` : ''}
@@ -228,6 +236,9 @@ module.exports = function (app, { wrap, page, log, hace }) {
   app.get('/destino/:id/cotizar', wrap(async (req, res) => {
     const d = await one('select * from destinos where id=$1', [req.params.id]); if (!d) return res.status(404).send('No existe');
     const c = await one('select c.*, p.nombre, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [d.caso_id]);
+    // no se cotiza hasta tener todo lo que hace falta
+    if (c.fase === 'lead' && ['nuevo', 'preguntando', 'aguardando', 'para_cotizar'].includes(c.etapa)
+      && reglas.faltanParaCotizar(c, await q('select * from destinos where caso_id=$1', [c.id])).length) return res.redirect(`/caso/${c.id}?falta=1`);
     let k = await one(`select * from cotizaciones where destino_id=$1 and estado='borrador' order by id desc limit 1`, [d.id]);
     if (!k) {
       const base = req.query.base ? await one('select * from cotizaciones where id=$1', [req.query.base]) : null;

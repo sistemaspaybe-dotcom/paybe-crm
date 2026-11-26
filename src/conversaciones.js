@@ -36,6 +36,13 @@ function esRuido(texto) {
 
 // por qué se filtró (lo elige el equipo con el botón Filtrar; la regla y la IA ponen "No es una consulta")
 const MOTIVOS_FILTRO = { no_consulta: 'No es una consulta', proveedor: 'Proveedor u otra agencia', spam: 'Spam o publicidad' };
+// ¿la respuesta del equipo le pidió datos? Solo así el lead pasa a Aguardando datos.
+// Cuenta si mandaron las preguntas armadas, o si el mensaje pregunta algo; un "¡dale!" o un saludo no.
+function preguntoAlgo(texto, c) {
+  const t = String(texto || '').trim();
+  if (c.borrador_tipo === 'preguntas' && c.borrador && t.slice(0, 40) === String(c.borrador).trim().slice(0, 40)) return true;
+  return /[?¿]/.test(t);
+}
 async function filtrarConversacion(personaId, canal, quien, motivo = 'no_consulta') {
   await q(`update conversaciones set cerrada='filtrado', cerrada_en=now(), cerrada_por=$3, motivo=$4 where persona_id=$1 and canal=$2`, [personaId, canal, quien, motivo]);
 }
@@ -169,4 +176,4 @@ async function limpiarViejos() {
   await q("insert into ajustes(clave,valor) values('migracion_filtro_2611', now()::text)");
 }
 
-module.exports = { BOTON_PERSONAL, BOTON_FILTRAR, MOTIVOS_FILTRO, tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };
+module.exports = { preguntoAlgo, BOTON_PERSONAL, BOTON_FILTRAR, MOTIVOS_FILTRO, tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };

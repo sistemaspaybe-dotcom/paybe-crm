@@ -111,4 +111,26 @@ function minimoUSD(d, { minimos, cortes }) {
   return Math.round((Number(m[2]) + dias * Number(m[3])) * (alta ? 1 + cortes.alta / 100 : 1));
 }
 
-module.exports = { DEFAULTS, ETIQUETAS_MENSAJES, leer, guardar, todas, mensajes, migrar, completar, primerNombre, evaluar, minimoPara, minimoUSD, esArgentina };
+// Lo que Sol necesita para cotizar, por tipo de consulta (reunión del 18/11). Hasta que esté todo, el lead no pasa a "Para cotizar".
+// Ocasión especial y cuándo confirma son opcionales: personalizan la propuesta pero no frenan la cotización.
+const NECESARIOS = {
+  'Viaje a medida': ['destino', 'fechas', 'dias', 'cuantos', 'presupuesto', 'salida', 'categoria'],
+  'Salida grupal': ['destino', 'cuantos', 'salida'],
+  'Aéreo': ['destino', 'fechas', 'cuantos', 'salida', 'categoria'],
+  'Hotel': ['destino', 'fechas', 'dias', 'cuantos', 'categoria'],
+  'Visa': ['destino', 'cuantos'],
+};
+const NOMBRE_DATO = { tipo: 'tipo de consulta', destino: 'destino', fechas: 'fechas', dias: 'cuántos días', cuantos: 'cuántos viajan', presupuesto: 'presupuesto', salida: 'desde dónde salen', categoria: 'categoría' };
+function faltanParaCotizar(c, destinos) {
+  if (!c.servicio) return ['tipo'];
+  const pide = NECESARIOS[c.servicio] || NECESARIOS['Viaje a medida'];
+  const ds = (destinos || []).filter(d => !['descartado', 'no_eligio'].includes(d.estado));
+  const vacio = v => v == null || String(v).trim() === '';
+  return pide.filter(k => k === 'destino' ? !ds.length
+    : k === 'fechas' ? !ds.length || ds.some(d => vacio(d.fechas))
+    : k === 'dias' ? !ds.length || ds.some(d => !Number(d.dias))
+    : k === 'presupuesto' ? vacio(c.presupuesto) && !ds.some(d => Number(d.presupuesto_usd))
+    : vacio(c[k]));
+}
+
+module.exports = { NECESARIOS, NOMBRE_DATO, faltanParaCotizar, DEFAULTS, ETIQUETAS_MENSAJES, leer, guardar, todas, mensajes, migrar, completar, primerNombre, evaluar, minimoPara, minimoUSD, esArgentina };
