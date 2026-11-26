@@ -37,14 +37,14 @@ const CSS = `<style>
 .an .ico{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:16px;background:var(--c);color:#fff}
 .an .bajada{color:#5A6670;margin:4px 0 14px}
 .an .cuerpo{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:24px}
-.dona{position:relative;width:150px;height:150px;flex:none}.dona svg{transform:rotate(-90deg)}
+.dona{position:relative;width:150px;height:150px;flex:none}.dona svg{transform:rotate(-90deg);width:100%;height:100%}
 .dona .cen{position:absolute;inset:0;display:grid;place-content:center;text-align:center}.dona .cen b{font:700 38px/1 Figtree,system-ui}.dona .cen span{font-size:13px;color:#5A6670;margin-top:4px}
 .pills{display:grid;gap:8px;justify-items:start}
 .pill{display:inline-flex;align-items:baseline;gap:8px;line-height:1.3;padding:7px 14px;border-radius:10px;font-size:15px;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff)}
 .pill::before{content:'';width:9px;height:9px;border-radius:50%;background:var(--c);flex:none;align-self:center}.pill b{font-weight:800}.pill.cero{opacity:.45}
 .pill:hover{background:color-mix(in srgb,var(--c) 20%,#fff)}
 .pill{font-size:14px}
-@media (max-width:900px){.anillos{grid-template-columns:1fr}.an .cuerpo{grid-template-columns:120px 1fr;gap:16px}.dona{width:120px;height:120px}.dona svg{width:120px;height:120px}.dona .cen b{font-size:30px}}
+@media (max-width:900px){.anillos{grid-template-columns:1fr}.an .cuerpo{grid-template-columns:110px 1fr;gap:14px}.an{padding:16px}.dona{width:110px;height:110px}.dona .cen b{font-size:28px}.dona .cen span{font-size:11px;margin-top:2px}.pill{font-size:13px;padding:6px 10px}}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.cols,.dos{grid-template-columns:1fr}.embudo{overflow-x:auto;padding-bottom:4px}.embudo a{flex:0 0 76px;font-size:11px}.fases{display:none}.kpi .n{font-size:28px}}
 </style>`;
 
