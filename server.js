@@ -84,7 +84,7 @@ app.get('/nuevo', (req, res) => req.query.oficina ? page(req, res, 'Visita a la 
 <p><button class="p">Crear lead</button></p></form>`, '/leads') : page(req, res, 'Agregar lead', `<h1>Agregar lead</h1><form class="card" method=post action=/nuevo><div class="f">
 <div><label>Nombre</label><input name=nombre required></div><div><label>WhatsApp</label><input name=whatsapp></div><div><label>Mail</label><input name=mail></div>
 <div><label>De dónde vino</label><select name=origen>${['Instagram', 'WhatsApp', 'Mail', 'Recomendado', 'Oficina o teléfono', 'Cliente que vuelve'].map(o => `<option>${o}</option>`).join('')}</select></div>
-<div><label>Qué pide</label><select name=servicio>${['', 'Aéreo', 'Hotel', 'Paquete', 'Visa', 'Grupal', 'Crucero'].map(o => `<option>${o}</option>`).join('')}</select></div>
+<div><label>Tipo de consulta</label><select name=servicio>${['', ...Object.keys(reglas.DEFAULTS.preguntas)].map(o => `<option>${o}</option>`).join('')}</select></div>
 <div><label>Destino</label><input name=destino></div><div><label>Fechas</label><input name=fechas></div><div><label>Cuántos</label><input name=cuantos></div><div><label>Presupuesto</label><input name=presupuesto></div></div>
 <p><button class="p">Crear lead</button></p></form>`));
 app.post('/nuevo', wrap(async (req, res) => {
