@@ -50,7 +50,8 @@ Tipos de consulta y lo que hace falta saber para cotizar cada uno:
 ${Object.entries(R.preguntas).map(([t, l]) => `- ${t}: ${l.join('; ')}`).join('\n')}
 
 Devolvé SOLO un JSON con esta forma (null cuando el cliente no lo dijo; no inventes):
-{"tipo": uno de ${JSON.stringify(Object.keys(R.preguntas))},
+{"es_consulta": true si la persona pide información, precio o un viaje (aunque sea vago, como "hola, info"); false si NO es una consulta de un posible cliente: reacciones o comentarios a historias o reels, chistes, saludos entre conocidos, menciones, proveedores, otras agencias u operadores ofreciendo tarifas o servicios, spam,
+ "tipo": uno de ${JSON.stringify(Object.keys(R.preguntas))},
  "caso": "uno" (un destino) | "combinado" (varios destinos en el mismo viaje) | "opciones" (está eligiendo entre destinos) | "distintos" (viajes distintos en fechas distintas),
  "cuantos": texto corto, "salida": ciudad de salida, "presupuesto": como lo dijo, "presupuesto_usd": número por persona en dólares o null, "confirma": cuándo quiere confirmar,
  "ocasion": si es por algo especial (cumpleaños, luna de miel, aniversario, viaje soñado), "categoria": qué categoría busca (aéreo económico o business, tipo de alojamiento), "whatsapp": teléfono, "mail": mail,
@@ -65,6 +66,13 @@ ${hilo}
 </conversacion>`;
   const d = await preguntarIA(pedido);
   if (!d || typeof d !== 'object') return;
+
+  // 1 · ¿es una consulta? Solo se filtra si el equipo todavía no le escribió
+  if (d.es_consulta === false && c.etapa === 'nuevo' && !await one('select 1 from mensajes where caso_id=$1 and not entrante', [c.id])
+    && !await one(`select 1 from actividad where caso_id=$1 and texto like 'Era una consulta%'`, [c.id])) { // si el equipo dijo que es consulta, la IA no lo vuelve a filtrar
+    await require('./conversaciones').filtrarCaso(c.id, 'IA');
+    return;
+  }
 
   // lo común, en la consulta
   const tipo = Object.keys(R.preguntas).includes(d.tipo) ? d.tipo : null;
@@ -92,12 +100,31 @@ ${hilo}
 
   const faltan = Array.isArray(d.faltan) ? d.faltan.filter(Boolean) : [];
   const mensaje = txt(d.mensaje) ? String(d.mensaje).trim().slice(0, 950) : null;
+  // 2 · ¿dio todo lo que hace falta para cotizar? Si falta algo, 3 · se le pregunta todo junto, en un solo mensaje
   if (modoPreguntar && faltan.length && mensaje) {
     await q(`update casos set borrador=$1, borrador_tipo='preguntas', borrador_en=now(), etapa='preguntando', actualizado=now() where id=$2`, [mensaje, c.id]);
     if (c.etapa !== 'preguntando') await anotar(c.id, 'La IA armó las preguntas para cotizar. Pasa a Preguntando.');
+    await mandarSolo(c.id, mensaje);
     return;
   }
   await ponerSemaforo(c.id, R);
+}
+
+// manda las preguntas sola por Instagram, una sola vez por consulta, si está activado en Ajustes,
+// si el equipo todavía no le contestó y si Instagram lo deja (24 h desde su último mensaje). Si no, queda el borrador.
+const autoActivado = async () => (await one(`select valor from ajustes where clave='auto_preguntas'`))?.valor !== 'no';
+async function mandarSolo(casoId, texto) {
+  if (!await autoActivado()) return;
+  const c = await one('select c.*, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [casoId]);
+  if (!c || !c.instagram_id || c.preguntas_en) return;
+  const ult = await one('select entrante, creado from mensajes where caso_id=$1 order by creado desc limit 1', [casoId]);
+  if (!ult || !ult.entrante || Date.now() - new Date(ult.creado) > 23 * 3600e3) return;
+  const ig = require('./instagram');
+  try {
+    const mid = await ig.enviar(c.instagram_id, texto);
+    await ig.enCola(() => ig.registrar({ igsid: c.instagram_id, mid: mid || 'crm-' + Date.now(), entrante: false, texto, cuando: new Date() }));
+    await anotar(casoId, 'La IA le mandó sola las preguntas para cotizar por Instagram.');
+  } catch (e) { await anotar(casoId, 'No se pudieron mandar solas las preguntas: ' + e.message + '. Quedó el borrador para mandarlo a mano.'); }
 }
 
 async function ponerSemaforo(casoId, R) {

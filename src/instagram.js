@@ -1,4 +1,5 @@
-// Instagram: los mensajes directos de la cuenta de Paybe entran solos a Conversaciones (el lead lo crea el equipo).
+// Instagram: los mensajes directos de la cuenta de Paybe entran solos. Si es una consulta, se crea el lead;
+// si no (reels, menciones, reacciones a historias), va a Filtrados.
 // Dos caminos que se cubren entre sí: el aviso de Meta al instante (webhook)
 // y una pasada cada 5 minutos que trae lo que el aviso no haya mandado.
 const crypto = require('crypto');
@@ -66,11 +67,16 @@ async function registrar({ igsid, username, nombre, mid, entrante, texto, cuando
   // el mismo mensaje puede llegar por los dos caminos con distinto identificador
   if (await one(`select 1 from mensajes where persona_id=$1 and entrante=$2 and texto=$3 and abs(extract(epoch from creado - $4::timestamptz)) < 5`, [p.id, entrante, texto, cuando])) return;
 
-  // si ya tiene una consulta abierta, el mensaje se suma ahí; si no, queda en Conversaciones hasta que el equipo cree el lead
-  const c = await one(`select * from casos where persona_id=$1 and fase<>'baja' and not (fase='venta' and etapa='fin') order by creado desc limit 1`, [p.id]);
+  // si ya tiene una consulta abierta, el mensaje se suma ahí; si no, pasa por el filtro
+  let c = await one(`select * from casos where persona_id=$1 and fase<>'baja' and not (fase='venta' and etapa='fin') order by creado desc limit 1`, [p.id]);
   const ultimo = c && await one('select entrante from mensajes where caso_id=$1 order by creado desc limit 1', [c.id]);
   const ins = await one('insert into mensajes(persona_id,caso_id,mid,entrante,texto,creado) values($1,$2,$3,$4,$5,$6) on conflict (mid) do nothing returning id', [p.id, c?.id || null, mid, entrante, texto, cuando]);
   if (ins) await conv.tocar(p.id, 'instagram', entrante, cuando);
+  if (ins && !c && entrante) {
+    if (conv.esRuido(texto)) { await conv.filtrarConversacion(p.id, 'instagram', 'Regla'); return true; }
+    const id = await conv.crearLead(p.id, 'instagram', 'Instagram', 'Lead creado solo: escribió por Instagram.');
+    c = await one('select * from casos where id=$1', [id]);
+  }
   if (!ins || !c) return !!ins;
   await q('update casos set actualizado=now() where id=$1', [c.id]);
   const anotar = texto => q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [c.id, 'Instagram', texto]);

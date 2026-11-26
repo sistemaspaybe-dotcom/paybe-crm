@@ -44,16 +44,18 @@ app.use((req, res, next) => { if (!req.session.quien) req.session.quien = 'Equip
 // ---- listas ----
 const SEMI = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };
 const chipsDestinos = c => (c.dests || []).filter(d => d && d.nombre).map(d => `<span class="chip" style="margin:2px 2px 0 0">${SEMI[d.semaforo] && ['pendiente', 'semaforo'].includes(d.estado) ? SEMI[d.semaforo] + ' ' : ''}${esc(d.nombre)}${d.estado === 'cotizado' ? ' · cotizado' : d.estado === 'eligio' ? ' ✓' : ''}</span>`).join('');
-const filaCaso = c => `<tr><td><a href="/caso/${c.id}"><b>${c.origen === 'Demo' ? '🧪 ' : ''}${esc(c.nombre)}</b></a><div>${chipsDestinos(c) || `<span class="mut">${esc(c.destino || '')}</span>`}</div>${c.borrador ? '<div class=mut>✎ Borrador para mandar</div>' : ''}</td><td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span></td><td>${esc(c.servicio || '')}</td><td class="mut">${esc(c.fechas || '')} ${c.cuantos ? '· ' + esc(c.cuantos) : ''}</td><td class="mut">${fecha(c.actualizado)}</td></tr>`;
+const filaCaso = c => `<tr><td><a href="/caso/${c.id}"><b>${c.origen === 'Demo' ? '🧪 ' : ''}${esc(c.nombre)}</b></a><div>${chipsDestinos(c) || `<span class="mut">${esc(c.destino || '')}</span>`}</div>${c.borrador ? '<div class=mut>✎ Borrador para mandar</div>' : ''}</td><td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span>${conv.chipChat(c)}</td><td>${esc(c.servicio || '')}</td><td class="mut">${esc(c.fechas || '')} ${c.cuantos ? '· ' + esc(c.cuantos) : ''}</td><td class="mut">${fecha(c.actualizado)}</td></tr>`;
 async function lista(req, res, fase, titulo, ruta) {
-  const rows = await q(`select c.*, p.nombre, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id where c.fase=$1 order by c.actualizado desc`, [fase]);
+  const rows = await q(`select c.*, p.nombre,
+    (select entrante from mensajes m where m.caso_id=c.id order by creado desc limit 1) ult_entrante,
+    exists (select 1 from mensajes m where m.caso_id=c.id and not m.entrante) respondimos, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id where c.fase=$1 order by c.actualizado desc`, [fase]);
+  if (fase === 'lead') rows.sort((a, b) => (conv.estadoChat(b) === 'te_toca' || conv.estadoChat(b) === 'nueva') - (conv.estadoChat(a) === 'te_toca' || conv.estadoChat(a) === 'nueva'));
   const orden = Object.keys(FASES[fase].etapas);
   const porEtapa = orden.map(e => `<span class="chip">${FASES[fase].etapas[e]} · ${rows.filter(r => r.etapa === e).length}</span>`).join(' ');
-  const tabs = fase === 'lead' ? `<div class="row" style="justify-content:space-between"><h1>Leads</h1><div class="row"><a class="btn" href="/nuevo?oficina=1">+ Visita a la oficina</a><a class="btn p" href="/nuevo">+ Agregar lead</a></div></div>
-  <div class="row" style="margin:12px 0;gap:0;border-bottom:1px solid var(--linea)"><a href="/leads" style="padding:10px 14px;font-weight:700;color:#5A6670">Conversaciones abiertas · ${(await conv.abiertas()).length}</a><a href="/leads?tab=leads" style="padding:10px 14px;font-weight:700;border-bottom:3px solid var(--coral);color:var(--marino)">Leads · ${rows.length}</a></div>` : `<h1>${titulo} · ${rows.length}</h1>`;
+  const tabs = fase === 'lead' ? await conv.encabezado('leads', rows.length) : `<h1>${titulo} · ${rows.length}</h1>`;
   page(req, res, titulo, `${tabs}<p>${porEtapa}</p><div class="card"><table><tr><th>Persona</th><th>Etapa</th><th>Servicio</th><th>Viaje</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
 }
-conv.rutas(app, { wrap, page, log, hace, ig, ia });
+conv.rutas(app, { wrap, page, log, ig });
 app.get('/leads', wrap((req, res) => lista(req, res, 'lead', 'Leads', '/leads')));
 app.get('/oportunidades', wrap((req, res) => lista(req, res, 'oportunidad', 'Oportunidades', '/oportunidades')));
 app.get('/ventas', wrap((req, res) => lista(req, res, 'venta', 'Ventas', '/ventas')));
@@ -65,7 +67,7 @@ app.get('/', wrap(async (req, res) => {
   const nuevos = await q(`select c.*, p.nombre, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id where (c.fase='lead' and (c.etapa in ('para_cotizar','cotizando') or c.borrador is not null)) or (c.fase='oportunidad' and c.etapa='le_intereso') order by c.actualizado limit 20`);
   const sinContestar = (await conv.sinContestar()).slice(0, 20);
   page(req, res, 'Inicio', `<h1>Lo de hoy</h1>
-  ${sinContestar.length ? `<h2 style="margin:16px 0 8px">Sin contestar · ${sinContestar.length}</h2>${sinContestar.map(m => `<a class="aviso rojo" href="/leads?c=${m.id}" style="color:inherit"><span>${conv.icono(m.canal)} <b>${esc(m.nombre)}</b> · ${esc((m.ult_texto || '').slice(0, 90))}</span><span class="mut">${hace(m.ult_en)}</span></a>`).join('')}` : ''}
+  ${sinContestar.length ? `<h2 style="margin:16px 0 8px">Sin contestar · ${sinContestar.length}</h2>${sinContestar.map(m => `<a class="aviso rojo" href="${m.caso_id ? '/caso/' + m.caso_id + '#chat' : '/leads'}" style="color:inherit"><span>${conv.icono(m.canal)} <b>${esc(m.nombre)}</b> · ${esc((m.ult_texto || '').slice(0, 90))}</span><span class="mut">${hace(m.ult_en)}</span></a>`).join('')}` : ''}
   <h2 style="margin:16px 0 8px">Avisos</h2>${avisos.map(a => `<div class="aviso ${String(a.para.toISOString?.().slice(0, 10) || a.para) < hoy ? 'rojo' : ''}"><span><b>${esc(a.nombre)}</b> · ${esc(a.texto)} <span class="mut">(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('') || '<p class=mut>No hay avisos pendientes.</p>'}
   <h2 style="margin:16px 0 8px">Para hacer: mensajes para mandar, para cotizar y cotizando</h2><div class="card"><table>${nuevos.map(filaCaso).join('') || '<tr><td class=mut>Nada pendiente.</td></tr>'}</table></div>`, '/');
 }));
@@ -173,9 +175,9 @@ app.post('/cotizaciones/:id/resultado', wrap(async (req, res) => { await q('upda
 
 // ---- dashboards ----
 app.get('/dashboards', wrap(async (req, res) => {
-  const f = await q(`select fase, etapa, count(*)::int n from casos group by 1,2`);
+  const f = await q(`select fase, etapa, count(*)::int n from casos where motivo_baja is distinct from 'No es consulta' group by 1,2`);
   const n = (fase, etapa) => f.filter(r => r.fase === fase && (!etapa || r.etapa === etapa)).reduce((s, r) => s + r.n, 0);
-  const motivos = await q(`select motivo_baja m, baja_desde d, count(*)::int n from casos where fase='baja' group by 1,2 order by 3 desc`);
+  const motivos = await q(`select motivo_baja m, baja_desde d, count(*)::int n from casos where fase='baja' and motivo_baja<>'No es consulta' group by 1,2 order by 3 desc`);
   const origen = await q(`select coalesce(p.origen,'—') o, count(*)::int n, count(*) filter (where c.fase='venta')::int ventas from casos c join personas p on p.id=c.persona_id group by 1 order by 2 desc`);
   const sem = await one(`select count(*) filter (where creado > now()-interval '7 days')::int consultas from casos`);
   const cot = await one(`select count(*)::int n, count(*) filter (where resultado='vendió')::int v from cotizaciones where mandada > current_date-7`);
@@ -190,7 +192,7 @@ app.get('/dashboards', wrap(async (req, res) => {
 // ---- instagram: estado de la conexión ----
 app.get('/instagram', wrap(async (req, res) => {
   const e = await ig.estado(), si = v => v ? '✓' : 'Falta', cuando = d => d ? new Date(d).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }) : '—';
-  page(req, res, 'Instagram', `<h1>Instagram</h1><p class=mut>Los mensajes que llegan a la cuenta entran solos a Leads → Conversaciones abiertas. El lead lo crea el equipo desde la conversación.</p>
+  page(req, res, 'Instagram', `<h1>Instagram</h1><p class=mut>Los mensajes que llegan a la cuenta entran solos: si es una consulta se crea el lead; si no (reels, menciones, reacciones a historias), va a Leads → Filtrados.</p>
   <div class="card"><table><tr><td>Cuenta conectada</td><td>${e.cuenta ? '@' + esc(e.cuenta) : '—'}</td></tr><tr><td>Token (IG_ACCESS_TOKEN)</td><td>${si(e.token)}</td></tr><tr><td>Secreto de la app (IG_APP_SECRET)</td><td>${si(e.secreto)}</td></tr><tr><td>Clave de verificación (IG_VERIFY_TOKEN)</td><td>${si(e.verify)}</td></tr><tr><td>Lectura con IA para completar la ficha (ANTHROPIC_API_KEY)</td><td>${si(e.ia)}</td></tr>
   <tr><td>Toma mensajes desde</td><td>${cuando(e.desde)}</td></tr><tr><td>Mensajes guardados</td><td>${e.mensajes}</td></tr><tr><td>Último mensaje</td><td>${cuando(e.ultimoMensaje)}</td></tr><tr><td>Último aviso de Meta</td><td>${cuando(e.aviso)}</td></tr><tr><td>Última pasada</td><td>${cuando(e.sync)}</td></tr><tr><td>Token renovado</td><td>${cuando(e.tokenFecha)}</td></tr>
   ${e.error ? `<tr><td>Último error</td><td style="color:#B84A53">${esc(e.error)}</td></tr>` : ''}</table>
@@ -203,6 +205,6 @@ app.post('/instagram/sincronizar', wrap(async (req, res) => {
 
 app.use((e, req, res, next) => { console.error(e); res.status(500).send('Algo salió mal. Probá de nuevo.'); });
 const port = process.env.PORT || 3000;
-db.init().then(reglas.migrar).then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message));
+db.init().then(reglas.migrar).then(conv.limpiarViejos).then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message));
   const tarea = () => ia.revisarRecordatorios().then(ia.revisarSeguimientos).then(despues.revisar).catch(e => console.error('Recordatorios:', e.message));
   setTimeout(tarea, 30e3); setInterval(tarea, 5 * 60e3).unref(); })).catch(e => { console.error(e); process.exit(1); });

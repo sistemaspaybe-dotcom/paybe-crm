@@ -40,6 +40,8 @@ module.exports = function (app, { wrap, page, log, hace }) {
       q(`select id, destino, fase, etapa from casos where persona_id=$1 and id<>$2 and fase<>'baja' and not (fase='venta' and etapa='fin') order by creado desc`, [c.persona_id, c.id]),
     ]);
     const ventana = await enVentana(c.id);
+    // el chat pegado solo tiene sentido si la consulta sigue por WhatsApp (los de Instagram entran solos)
+    const esWhatsApp = chats.length > 0 || c.origen === 'WhatsApp' || (!c.instagram_id && !!c.whatsapp);
 
     // barra de etapas
     const barra = (lista, actual, previos = []) => `<div class="bar">${previos.map(p => `<div class="ok">${p}</div>`).join('')}${lista.map(([k, n], i) => { const idx = lista.findIndex(([x]) => x === actual); return `<div class="${i < idx ? 'ok' : i === idx ? 'now' : ''}">${n}${i < idx ? ' ✓' : ''}</div>`; }).join('')}</div>`;
@@ -93,9 +95,10 @@ module.exports = function (app, { wrap, page, log, hace }) {
 
     // chat de Instagram
     const igBtn = c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : '';
-    const hilo = msgs.length ? `<div class="card"><div class="row" style="justify-content:space-between"><h2>Instagram${c.instagram_user ? ` <span class=mut>@${esc(c.instagram_user)}</span>` : ''}</h2>${msgs[msgs.length - 1].entrante ? '<span class="chip op">Sin contestar</span>' : '<span class="chip ve">Contestado</span>'}</div>
+    const hilo = msgs.length ? `<div class="card" id=chat><div class="row" style="justify-content:space-between"><h2>Instagram${c.instagram_user ? ` <span class=mut>@${esc(c.instagram_user)}</span>` : ''}</h2>${msgs[msgs.length - 1].entrante ? '<span class="chip op">Sin contestar</span>' : '<span class="chip ve">Contestado</span>'}</div>
       <div style="display:grid;gap:6px;margin-top:10px;max-height:460px;overflow:auto">${msgs.map(m => `<div style="max-width:78%;padding:8px 12px;border-radius:14px;${m.entrante ? 'background:#F3ECE8;justify-self:start' : 'background:#E3EEF5;justify-self:end'}"><pre>${esc(m.texto)}</pre><div class=mut style="font-size:11px">${m.entrante ? '' : 'Paybe · '}${new Date(m.creado).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })}</div></div>`).join('')}</div>
-      ${ia.hayIA() && c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/leer style="margin-top:8px"><button>Leer el chat de nuevo con la IA</button></form>` : ''}</div>` : '';
+      ${c.instagram_id && ventana ? `<form method=post action=/caso/${c.id}/responder style="margin-top:10px"><textarea name=texto rows=2 placeholder="Escribí la respuesta" required></textarea><p><button class="p">Enviar por Instagram</button></p></form>` : c.instagram_id ? '<p class=mut style="margin-top:8px">Pasaron más de 24 h desde su último mensaje: Instagram no deja contestar desde el CRM. Contestá desde la app.</p>' : ''}
+      <div class="row" style="margin-top:8px">${ia.hayIA() && c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/leer><button>Leer el chat de nuevo con la IA</button></form>` : ''}${c.fase === 'lead' && ['nuevo', 'preguntando', 'aguardando'].includes(c.etapa) ? `<form method=post action=/caso/${c.id}/no-es-consulta><button>No es consulta → Filtrados</button></form>` : ''}</div></div>` : '';
 
     const acc = accionesPara(c).map(a => `<form method=post action=/caso/${c.id}/${a.k}>${a.pago ? `<input name=monto placeholder="Monto" inputmode=decimal style="width:120px"> <select name=moneda style="width:90px"><option>USD</option><option>ARS</option></select> <select name=medio style="width:190px">${MEDIOS.map(m => `<option>${m}</option>`).join('')}</select> ` : ''}<button class="g">${esc(a.label)}</button></form>`).join('');
     const baja = BAJAS[c.fase] && !(c.fase === 'lead' && c.etapa === 'esperando') ? `<form method=post action=/caso/${c.id}/baja class="row"><select name=motivo style="width:230px">${MOTIVOS.map(m => `<option>${m}</option>`).join('')}</select><button>${BAJAS[c.fase]}</button></form>` : '';
@@ -121,9 +124,9 @@ module.exports = function (app, { wrap, page, log, hace }) {
     <div><label>Sale</label><input type=date name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"></div><div><label>Vuelve</label><input type=date name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}"></div>
     <div style="grid-column:1/-1"><button class="p">Guardar</button></div></form></div>
     <div class="card"><h2>Recordame</h2><form method=post action=/caso/${c.id}/aviso class="f" style="margin-top:8px"><div><label>Cuándo</label><input type=date name=para required value="${new Date(Date.now() + 864e5 * 2).toISOString().slice(0, 10)}"></div><div><label>Qué</label><input name=texto required placeholder="Chequear si contestó"></div><div><button>Crear aviso</button></div></form></div></div>
-    <div class="card"><h2>Chat de WhatsApp u otro canal</h2><p class=mut>Pegá el chat: se guarda con un resumen${ia.hayIA() ? ' y la IA lo lee para completar los destinos' : ''}.</p>
+    ${esWhatsApp ? `<div class="card"><h2>Chat de WhatsApp</h2><p class=mut>Exportá el chat desde WhatsApp y pegalo acá: se guarda con un resumen${ia.hayIA() ? ' y la IA lo lee para completar los destinos' : ''}.</p>
     <form method=post action=/caso/${c.id}/chat><textarea name=texto rows=5 placeholder="Pegá acá el chat de WhatsApp"></textarea><p><button class="p">Guardar y leer</button></p></form>
-    ${chats.map(h => `<div class="card" style="background:#FFF8F6"><b>${fecha(h.creado)}</b><pre>${esc(h.resumen || '(sin resumen: falta la clave de IA)')}</pre></div>`).join('')}</div>
+    ${chats.map(h => `<div class="card" style="background:#FFF8F6"><b>${fecha(h.creado)}</b><pre>${esc(h.resumen || '(sin resumen: falta la clave de IA)')}</pre></div>`).join('')}</div>` : ''}
     ${c.fase !== 'lead' ? `<div class="grid"><div class="card"><h2>Pagos</h2><table>${pagos.map(p => `<tr><td>${fecha(p.fecha)}</td><td>${esc(p.que)}</td><td>${esc(p.medio)}${p.comprobante === false ? ` <form method=post action=/pago/${p.id}/comprobante style="display:inline"><span class="chip op">Falta comprobante</span> <button>Llegó</button></form>` : ''}</td><td>${dinero(p.monto, p.moneda)}</td></tr>`).join('') || '<tr><td class=mut>Sin pagos.</td></tr>'}</table></div>
     <div class="card"><h2>Reservas</h2>${reservas.map(r => `<div class=row style="justify-content:space-between"><span>${esc(r.servicio)}</span><form method=post action=/reserva/${r.id}/toggle><button>${r.estado === 'confirmada' ? 'Confirmada ✓' : 'Pendiente'}</button></form></div>`).join('') || '<p class=mut>Sin reservas.</p>'}
     <form method=post action=/caso/${c.id}/reserva class="row" style="margin-top:8px"><input name=servicio placeholder="Aéreo, hotel…" style="flex:1"><button>Agregar</button></form></div></div>` : ''}
@@ -380,6 +383,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
   // ---------- ajustes ----------
   app.get('/ajustes', wrap(async (req, res) => {
     const R = await reglas.todas(), M = await reglas.mensajes(), bases = await reglas.leer('bases');
+    const auto = (await one(`select valor from ajustes where clave='auto_preguntas'`))?.valor !== 'no';
     page(req, res, 'Ajustes', `<h1>Ajustes</h1><p class=mut>Lo que la IA pregunta antes de cotizar y cuándo vale la pena hacerlo. Propuesta inicial del 17/11, para validar con Sol.</p>
     <form method=post action=/ajustes>
     <div class="card"><h2>1 · Qué hace falta saber para cotizar</h2><p class=mut>Un dato por línea. La IA manda un solo mensaje con todo lo que falta y no pregunta lo que el cliente ya dijo.</p>
@@ -389,6 +393,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ${[...R.minimos, ['', '', '', ''], ['', '', '', '']].map((m, i) => `<tr><td><input name="m_nombre_${i}" value="${esc(m[0])}"></td><td><input name="m_palabras_${i}" value="${esc(m[1])}"></td><td><input name="m_aereo_${i}" value="${esc(m[2])}" style="width:90px"></td><td><input name="m_dia_${i}" value="${esc(m[3])}" style="width:90px"></td><td class=mut>${m[2] ? usd(Number(m[2]) + 10 * Number(m[3])) : ''}</td></tr>`).join('')}</table></div></div>
     <div class="card"><h2>3 · Semáforo</h2><div class="f"><div><label>🟢 Verde desde el % del mínimo</label><input name=verde value="${R.cortes.verde}"></div><div><label>🔴 Rojo debajo del % del mínimo</label><input name=rojo value="${R.cortes.rojo}"></div><div><label>Temporada alta: suma %</label><input name=alta value="${R.cortes.alta}"></div><div><label>Meses de temporada alta (números)</label><input name=meses value="${(R.cortes.mesesAlta || []).join(', ')}"></div></div>
     <p class=mut>Además: fechas vagas o sin presupuesto → como mucho 🟡. "Pasame solo el precio" → baja un nivel. No contestó ni después del recordatorio → 🔴. Ya es cliente → nunca 🔴. Visas y aéreos sueltos → directo a cotizar.</p></div>
+    <div class="card"><h2>Respuesta automática</h2><label style="display:flex;gap:8px;align-items:center;font-size:15px;color:var(--marino)"><input type=checkbox name=auto_preguntas value=si style="width:auto"${auto ? ' checked' : ''}> Cuando alguien consulta por Instagram y le falta información para cotizar, la IA le manda sola las preguntas (una sola vez, todo junto).</label><p class=mut>Si está apagado, el mensaje queda armado en la ficha para revisarlo y mandarlo a mano.</p></div>
     <div class="card"><h2>4 · Mensajes armados</h2><p class=mut>El CRM los prepara solos; el equipo los revisa antes de mandarlos. {nombre}, {destino}, {minimo} y {medio} se completan solos.</p>
     <div class="grid">${Object.entries(reglas.ETIQUETAS_MENSAJES).map(([k, t]) => `<div><label>${esc(t)}</label><textarea name="msg_${k}" rows=6>${esc(M[k])}</textarea></div>`).join('')}</div></div>
     <div class="card"><h2>5 · Bases y condiciones</h2><p class=mut>Salen al final de cada propuesta. Es un primer borrador con lo que dijo Sol: conviene que lo lea antes de usarlo.</p><textarea name=bases rows=6>${esc(bases)}</textarea></div>
@@ -402,6 +407,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     for (let i = 0; i < 40; i++) if (String(b['m_nombre_' + i] || '').trim() && Number(b['m_aereo_' + i])) minimos.push([b['m_nombre_' + i].trim(), String(b['m_palabras_' + i] || b['m_nombre_' + i]).trim(), Number(b['m_aereo_' + i]), Number(b['m_dia_' + i]) || 0]);
     await reglas.guardar('preguntas', preguntas);
     if (minimos.length) await reglas.guardar('minimos', minimos);
+    await q(`insert into ajustes(clave,valor) values('auto_preguntas',$1) on conflict (clave) do update set valor=excluded.valor`, [b.auto_preguntas === 'si' ? 'si' : 'no']);
     const mensajes = {};
     for (const k of Object.keys(reglas.ETIQUETAS_MENSAJES)) if (String(b['msg_' + k] || '').trim()) mensajes[k] = String(b['msg_' + k]).trim();
     await reglas.guardar('mensajes', mensajes);

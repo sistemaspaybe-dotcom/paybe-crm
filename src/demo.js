@@ -22,11 +22,15 @@ async function chat(p, c, mensajes) { // [[horasAtrás, 'c'|'p', texto]]
   for (const [h, quien, texto] of mensajes) await q(`insert into mensajes(persona_id,caso_id,mid,entrante,texto,creado) values($1,$2,$3,$4,$5,$6)`, [p.id, c.id, 'demo-' + Date.now() + '-' + (++n), quien === 'c', texto, hace(h)]);
   for (const [h, quien] of mensajes) await require('./conversaciones').tocar(p.id, 'instagram', quien === 'c', hace(h));
 }
-async function sueltos(p, mensajes) { // conversación que todavía no es lead
+async function sueltos(p, mensajes) { // alguien escribe por primera vez: pasa por el filtro, como un mensaje real
+  const conv = require('./conversaciones');
   for (const [h, quien, texto] of mensajes) {
     await q(`insert into mensajes(persona_id,mid,entrante,texto,creado) values($1,$2,$3,$4,$5)`, [p.id, 'demo-' + Date.now() + '-' + (++n), quien === 'c', texto, hace(h)]);
-    await require('./conversaciones').tocar(p.id, 'instagram', quien === 'c', hace(h));
+    await conv.tocar(p.id, 'instagram', quien === 'c', hace(h));
   }
+  const ultimo = mensajes[mensajes.length - 1][2];
+  if (conv.esRuido(ultimo)) await conv.filtrarConversacion(p.id, 'instagram', 'Regla');
+  else await conv.crearLead(p.id, 'instagram', 'Instagram', 'Lead creado solo: escribió por Instagram.');
 }
 async function destino(c, d) {
   return one(`insert into destinos(caso_id,nombre,fechas,dias,detalle,presupuesto_usd,preferencia,estado) values($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
@@ -119,9 +123,9 @@ async function cargar() {
   await q(`insert into avisos(caso_id,para,texto) values($1,current_date,'Dijo que sí: mandarle los datos para la seña')`, [cs.id]);
   await actividad(cs, [['Sol', 'Cotización de Tailandia v1 mandada. Pasa a Esperando respuesta.'], ['Sol', 'Dijo que sí a Tailandia (v1). Lead Convertido: pasa a Oportunidad.']]);
 
-  // 9 · Conversaciones que todavía no son lead: una consulta nueva y una respuesta a un reel
+  // 9 · Escriben por primera vez: una consulta (entra como lead) y una reacción a una historia (va a Filtrados)
   await sueltos(await persona('Roberto S.', 'robertos'), [[0.2, 'c', 'Buenas! Tienen cruceros por el Caribe para febrero?']]);
-  await sueltos(await persona('Vane L.', 'vane.lucero'), [[1.5, 'c', '(respondió a una historia) [reel] jajaja me encanta 😍']]);
+  await sueltos(await persona('Vane L.', 'vane.lucero'), [[1.5, 'c', '(respondió a una historia) jajaja me encanta 😍']]);
 
   // semáforo calculado con las reglas de Ajustes, igual que en una consulta real
   for (const c of [cc, cl, cu]) {
