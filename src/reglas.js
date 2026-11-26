@@ -77,6 +77,7 @@ function temporadaAlta(fechas, nombre, cortes) {
   if (/fin de ano|navidad|vacaciones de invierno/.test(f)) return true;
   return mes === 4 && /japon/.test(norm(nombre)); // cerezos
 }
+const DIAS_BASE = 7;
 const VAGAS = /(ano que viene|algun dia|no se|todavia no|mas adelante|capaz|a definir|sin fecha)/;
 
 // Devuelve { semaforo: 'verde'|'amarillo'|'rojo'|null, motivo }
@@ -87,13 +88,14 @@ function evaluar(d, ctx, reglas) {
   const NIVEL = ['rojo', 'amarillo', 'verde'];
   let nivel = 2; const motivos = [];
   const m = minimoPara(d.nombre, minimos);
-  const dias = Number(d.dias) || 0;
+  // los días son opcionales (los propone la agencia): sin días, se compara con un viaje tipo de DIAS_BASE días
+  const dias = Number(d.dias) || DIAS_BASE, supuestos = !Number(d.dias);
   if (!d.presupuesto_usd) { nivel = Math.min(nivel, 1); motivos.push('No dijo presupuesto: mandarle salidas armadas para que se ubique.'); }
   else if (m && dias) {
     const alta = temporadaAlta(d.fechas, d.nombre, cortes);
     const minimo = minimoUSD(d, reglas);
     const pct = Math.round(Number(d.presupuesto_usd) / minimo * 100);
-    const txt = `Pide USD ${Number(d.presupuesto_usd).toLocaleString('es-AR')} por persona; el mínimo para ${m[0]} ${dias} días${alta ? ' en temporada alta' : ''} es USD ${minimo.toLocaleString('es-AR')} (${pct}%).`;
+    const txt = `Pide USD ${Number(d.presupuesto_usd).toLocaleString('es-AR')} por persona; el mínimo para ${m[0]} ${dias} días${supuestos ? ' (viaje tipo: no dijo días)' : ''}${alta ? ' en temporada alta' : ''} es USD ${minimo.toLocaleString('es-AR')} (${pct}%).`;
     if (pct >= cortes.verde) motivos.push(txt + ' Alcanza.');
     else if (pct >= cortes.rojo) { nivel = Math.min(nivel, 1); motivos.push(txt + ' Se puede ajustando: menos días u hoteles 3★.'); }
     else { nivel = 0; motivos.push(txt + ' Ofrecerle otro destino.'); }
@@ -109,8 +111,8 @@ function evaluar(d, ctx, reglas) {
 
 // mínimo por persona en USD para un destino (null si no hay mínimo cargado o faltan los días)
 function minimoUSD(d, { minimos, cortes }) {
-  const m = minimoPara(d.nombre, minimos), dias = Number(d.dias) || 0;
-  if (!m || !dias) return null;
+  const m = minimoPara(d.nombre, minimos), dias = Number(d.dias) || DIAS_BASE;
+  if (!m) return null;
   const alta = temporadaAlta(d.fechas, d.nombre, cortes);
   return Math.round((Number(m[2]) + dias * Number(m[3])) * (alta ? 1 + cortes.alta / 100 : 1));
 }
