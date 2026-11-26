@@ -64,16 +64,7 @@ app.get('/oportunidades', wrap((req, res) => lista(req, res, 'oportunidad', 'Opo
 app.get('/ventas', wrap((req, res) => lista(req, res, 'venta', 'Ventas', '/ventas')));
 
 // ---- inicio ----
-app.get('/', wrap(async (req, res) => {
-  const avisos = await q(`select a.*, p.nombre, c.id caso from avisos a join casos c on c.id=a.caso_id join personas p on p.id=c.persona_id where not a.hecho order by a.para limit 20`);
-  const hoy = new Date().toISOString().slice(0, 10);
-  const nuevos = await q(`select c.*, p.nombre, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id where (c.fase='lead' and (c.etapa in ('para_cotizar','cotizando') or c.borrador is not null)) or (c.fase='oportunidad' and c.etapa='le_intereso') order by c.actualizado limit 20`);
-  const sinContestar = (await conv.sinContestar()).slice(0, 20);
-  page(req, res, 'Inicio', `<h1>Lo de hoy</h1>
-  ${sinContestar.length ? `<h2 style="margin:16px 0 8px">Sin contestar · ${sinContestar.length}</h2>${sinContestar.map(m => `<a class="aviso rojo" href="${m.caso_id ? '/caso/' + m.caso_id + '#chat' : '/leads'}" style="color:inherit"><span>${conv.icono(m.canal)} <b>${esc(m.nombre)}</b> · ${esc((m.ult_texto || '').slice(0, 90))}</span><span class="mut">${hace(m.ult_en)}</span></a>`).join('')}` : ''}
-  <h2 style="margin:16px 0 8px">Avisos</h2>${avisos.map(a => `<div class="aviso ${String(a.para.toISOString?.().slice(0, 10) || a.para) < hoy ? 'rojo' : ''}"><span><b>${esc(a.nombre)}</b> · ${esc(a.texto)} <span class="mut">(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('') || '<p class=mut>No hay avisos pendientes.</p>'}
-  <h2 style="margin:16px 0 8px">Para hacer: mensajes para mandar, para cotizar y cotizando</h2><div class="card"><table>${nuevos.map(filaCaso).join('') || '<tr><td class=mut>Nada pendiente.</td></tr>'}</table></div>`, '/');
-}));
+require('./src/inicio')(app, { wrap, page });
 app.post('/aviso/:id/hecho', wrap(async (req, res) => { await q('update avisos set hecho=true where id=$1', [req.params.id]); res.redirect(req.get('referer') || '/'); }));
 
 // ---- alta de lead ----
