@@ -7,6 +7,8 @@ const { q, one } = require('./db');
 const ia = require('./ia');
 const conv = require('./conversaciones');
 
+// en staging nunca se habla con el Instagram real (aunque se copien las variables de prod)
+const STAGING = process.env.STAGING === 'true';
 const HOST = process.env.IG_API || 'https://graph.instagram.com';
 const API = HOST + '/v26.0';
 const SECRETOS = [process.env.IG_APP_SECRET, process.env.META_APP_SECRET].filter(Boolean);
@@ -92,6 +94,7 @@ async function registrar({ igsid, username, nombre, mid, entrante, texto, cuando
 // ---- mandar un mensaje desde el CRM (sale desde la cuenta de Paybe) ----
 async function enviar(igsid, texto) {
   if (String(igsid).startsWith('demo-')) return 'demo-out-' + Date.now(); // consultas de prueba: no sale nada a Instagram
+  if (STAGING) throw new Error('Staging: no se manda nada a Instagram');
   const t = await token(); if (!t) throw new Error('Falta IG_ACCESS_TOKEN');
   const r = await fetch(API + '/me/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + t, 'content-type': 'application/json' },
     body: JSON.stringify({ recipient: { id: String(igsid) }, message: { text: String(texto).slice(0, 1000) } }) }).then(r => r.json());
@@ -120,6 +123,7 @@ function firmaOk(req) {
   });
 }
 function recibir(req, res) {
+  if (STAGING) return res.sendStatus(503);
   if (!SECRETOS.length) return res.status(503).send('Falta IG_APP_SECRET');
   if (!firmaOk(req)) return res.sendStatus(401);
   res.sendStatus(200); // Meta espera la respuesta enseguida; lo demás se procesa después
@@ -135,6 +139,7 @@ function recibir(req, res) {
 // ---- camino 2: pasada cada 5 minutos por las conversaciones recientes ----
 const aFecha = s => new Date(String(s).replace(/([+-]\d\d)(\d\d)$/, '$1:$2'));
 async function sincronizar() {
+  if (STAGING) return { ok: false, motivo: 'En staging Instagram está apagado' };
   if (!await token()) return { ok: false, motivo: 'Falta IG_ACCESS_TOKEN' };
   const desde = new Date(await ajuste('ig_desde'));
   const ultima = await ajuste('ig_ultima_sync');
@@ -159,6 +164,7 @@ async function sincronizar() {
 }
 
 async function iniciar() {
+  if (STAGING) return console.log('Instagram: apagado en staging.');
   if (!process.env.IG_ACCESS_TOKEN) return console.log('Instagram: sin configurar (falta IG_ACCESS_TOKEN).');
   if (!await ajuste('ig_desde')) await guardar('ig_desde', new Date().toISOString()); // solo entra lo que llegue desde ahora
   const tarea = f => () => f().catch(anotarError);

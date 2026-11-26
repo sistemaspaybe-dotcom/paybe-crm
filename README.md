@@ -28,3 +28,7 @@ Webhook: `https://<dominio>/webhooks/instagram`, campo `messages`. Estado de la 
 - **Comprobante:** transferencia o depósito quedan con "Falta comprobante", aviso y mensaje.
 - **Saldo:** aviso y mensaje 2 meses y 1 mes antes de la salida (hace falta la fecha "Sale").
 - **Ajustes:** mensajes armados y bases y condiciones editables.
+
+## Staging
+
+Entorno de prueba en Railway (rama `staging`, base propia). Variable `STAGING=true`: muestra una franja arriba y apaga Instagram (no recibe ni manda nada), aunque tenga las variables de prod. Se prueba con las consultas de prueba (Ajustes). Lo aprobado pasa a `main` → prod.
