@@ -8,6 +8,8 @@ const DEFAULTS = {
     'Aéreo': ['Origen y destino', 'Fechas de ida y vuelta', 'Cuántos pasajeros', 'Si llevan valija en bodega'],
     'Hotel': ['Destino y fechas', 'Cuántas habitaciones y personas', 'Qué categoría buscan'],
     'Visa': ['Qué país', 'Cuándo viajan', 'Si tienen pasaporte vigente', 'Si es la primera vez que la tramitan'],
+    'Alquiler de auto': ['Dónde lo retiran y dónde lo devuelven', 'Fechas y cuántos días', 'Qué tipo de auto (chico, mediano, SUV, manual o automático)', 'Edad del conductor'],
+    'Asistencia al viajero': ['A qué destino viajan', 'Fechas y cuántos días', 'Cuántos viajan y sus edades', 'Si van a hacer deportes o actividades de aventura'],
     'Salida grupal': ['Qué salida les interesa', 'Cuántos son', 'Habitación doble, triple o single'],
   },
   // destino, palabras para reconocerlo, aéreo USD, costo por día USD
@@ -47,6 +49,8 @@ const todas = async () => ({ preguntas: await leer('preguntas'), minimos: await 
 const mensajes = async () => ({ ...DEFAULTS.mensajes, ...(await leer('mensajes')) });
 // si las preguntas ya se habían editado, se suman una sola vez las dos nuevas de la weekly del 24/11
 async function migrar() {
+  const r2 = await one("select valor from ajustes where clave='reglas_preguntas'");
+  if (r2) { const p = JSON.parse(r2.valor); let cambio = false; for (const [t, l] of Object.entries(DEFAULTS.preguntas)) if (!p[t]) { p[t] = l; cambio = true; } if (cambio) await guardar('preguntas', p); }
   if (await one("select 1 from ajustes where clave='migracion_preguntas_2411'")) return;
   const r = await one("select valor from ajustes where clave='reglas_preguntas'");
   if (r) {
@@ -119,6 +123,8 @@ const NECESARIOS = {
   'Aéreo': ['destino', 'fechas', 'cuantos', 'salida', 'categoria'],
   'Hotel': ['destino', 'fechas', 'dias', 'cuantos', 'categoria'],
   'Visa': ['destino', 'cuantos'],
+  'Alquiler de auto': ['destino', 'fechas', 'dias', 'categoria'],
+  'Asistencia al viajero': ['destino', 'fechas', 'dias', 'cuantos'],
 };
 const NOMBRE_DATO = { tipo: 'tipo de consulta', destino: 'destino', fechas: 'fechas', dias: 'cuántos días', cuantos: 'cuántos viajan', presupuesto: 'presupuesto', salida: 'desde dónde salen', categoria: 'categoría' };
 // una consulta puede pedir varios servicios a la vez (se guardan separados por coma)
