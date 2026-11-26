@@ -118,15 +118,15 @@ function minimoUSD(d, { minimos, cortes }) {
 // Lo que Sol necesita para cotizar, por tipo de consulta (reunión del 18/11). Hasta que esté todo, el lead no pasa a "Para cotizar".
 // Ocasión especial y cuándo confirma son opcionales: personalizan la propuesta pero no frenan la cotización.
 const NECESARIOS = {
-  'Viaje a medida': ['destino', 'fechas', 'dias', 'cuantos', 'presupuesto', 'salida', 'categoria'],
+  'Viaje a medida': ['destino', 'fechas', 'cuantos', 'presupuesto', 'salida', 'categoria'],
   'Salida grupal': ['destino', 'cuantos', 'salida'],
   'Aéreo': ['destino', 'fechas', 'cuantos', 'salida', 'categoria'],
-  'Hotel': ['destino', 'fechas', 'dias', 'cuantos', 'categoria'],
+  'Hotel': ['destino', 'fechas', 'cuantos', 'categoria'],
   'Visa': ['destino', 'cuantos'],
-  'Alquiler de auto': ['destino', 'fechas', 'dias', 'categoria'],
-  'Asistencia al viajero': ['destino', 'fechas', 'dias', 'cuantos'],
+  'Alquiler de auto': ['destino', 'fechas', 'categoria'],
+  'Asistencia al viajero': ['destino', 'fechas', 'cuantos'],
 };
-const NOMBRE_DATO = { tipo: 'tipo de consulta', destino: 'destino', fechas: 'fechas', dias: 'cuántos días', cuantos: 'cuántos viajan', presupuesto: 'presupuesto', salida: 'desde dónde salen', categoria: 'categoría' };
+const NOMBRE_DATO = { tipo: 'tipo de consulta', destino: 'destino', fechas: 'fechas', dias: 'cuántos días', cuantos: 'cuántos viajan', presupuesto: 'presupuesto', salida: 'desde dónde sale', categoria: 'categoría' };
 // una consulta puede pedir varios servicios a la vez (se guardan separados por coma)
 const serviciosDe = c => String(c?.servicio || '').split(',').map(x => x.trim()).filter(Boolean);
 // lo necesario para cotizar es la suma de lo que pide cada servicio elegido
@@ -136,8 +136,10 @@ function faltanParaCotizar(c, destinos) {
   const ds = (destinos || []).filter(d => !['descartado', 'no_eligio'].includes(d.estado));
   const vacio = v => v == null || String(v).trim() === '';
   return pide.filter(k => k === 'destino' ? !ds.length
-    : k === 'fechas' ? !ds.length || ds.some(d => vacio(d.fechas))
-    : k === 'dias' ? !ds.length || ds.some(d => !Number(d.dias))
+    : k === 'fechas' ? !ds.length || ds.some(d => !(d.desde && d.hasta) && vacio(d.fechas))
+    : k === 'dias' ? false // los días los propone la agencia: opcionales
+    : k === 'salida' ? vacio(c.salida) && (!ds.length || ds.some(d => vacio(d.salida)))
+    : k === 'cuantos' ? vacio(c.cuantos) && !Number(c.adultos)
     : k === 'presupuesto' ? vacio(c.presupuesto) && !ds.some(d => Number(d.presupuesto_usd))
     : vacio(c[k])).concat(c.servicio ? [] : ['tipo']);
 }

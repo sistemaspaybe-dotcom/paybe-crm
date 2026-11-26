@@ -98,8 +98,25 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const marca = k => faltan.includes(k) ? ' class=falta' : '';
     const ast = k => pide.includes(k) ? ' *' : '';
     const faltaHtml = c.fase !== 'lead' ? '' : faltan.length
-      ? `<style>.falta>input,.falta>select,input.req{border-color:#D8626B;background:#FFF1F1}</style><div class="aviso rojo" style="margin:8px 0;display:block">Para cotizar falta: <b>${faltan.map(k => reglas.NOMBRE_DATO[k]).join(', ')}</b>.${faltan.some(k => ['destino', 'fechas', 'dias'].includes(k)) ? ' Los destinos van acá abajo, cada uno con sus fechas y días.' : ''} Hasta que esté todo no pasa a Para cotizar.</div>`
+      ? `<style>.falta>input,.falta>select,input.req{border-color:#D8626B;background:#FFF1F1}</style><div class="aviso rojo" style="margin:8px 0;display:block">Para cotizar falta: <b>${faltan.map(k => reglas.NOMBRE_DATO[k]).join(', ')}</b>.${faltan.some(k => ['destino', 'fechas', 'dias'].includes(k)) ? ' Los destinos van en las tarjetas de abajo.' : ''} Hasta que esté todo no pasa a Para cotizar.</div>`
       : '<div class="aviso" style="margin:8px 0;display:block">✓ Está todo lo necesario para cotizar.</div>';
+    // destinos como en la maqueta B: cada tarjeta es una opción de viaje (una cotización), con sus ciudades, desde–hasta y desde dónde sale
+    const iso = d => d ? new Date(d).toISOString().slice(0, 10) : '';
+    const ciudadesDe = d => Array.isArray(d.ciudades) && d.ciudades.length ? d.ciudades : String(d.nombre || '').split(/\s*\+\s*/).filter(Boolean).map(n => ({ nombre: n, dias: '' }));
+    const filaCiudad = (key, ci, j) => `<div class=ciudad><span class=fl>${j === 0 ? '●' : '→'}</span><input name="o_${key}_cn" value="${esc(ci.nombre || '')}" placeholder="${j === 0 ? 'Ciudad o país (ej. Barcelona)' : 'Otra ciudad'}" aria-label="Ciudad"><input name="o_${key}_cd" value="${ci.dias || ''}" placeholder="días" inputmode=numeric aria-label="Días (opcional)" class=dias></div>`;
+    const tarjetaOpcion = (key, d, n) => `<div class=opcion data-key="${key}">${n > 1 ? '<div class=o-sep>O, SI NO…</div>' : ''}<div class=o-card><div class=o-head><span>OPCIÓN ${n}</span>${n > 1 ? `<label class=mut style="margin:0;font-weight:500"><input type=checkbox name="o_${key}_quitar" style="width:auto"> Sacar</label>` : ''}</div>
+      <div class=ciudades>${(d ? ciudadesDe(d) : [{ nombre: '', dias: '' }]).map((ci, j) => filaCiudad(key, ci, j)).join('')}</div>
+      <button type=button class=mas onclick="otraCiudad(this)">+ Otra ciudad en este viaje</button>
+      <div class=o-campos><label>Desde<input type=date name="o_${key}_desde" value="${d ? iso(d.desde) : ''}" class="${faltan.includes('fechas') && d && !(d.desde && d.hasta) && !d.fechas ? 'req' : ''}"></label><label>Hasta<input type=date name="o_${key}_hasta" value="${d ? iso(d.hasta) : ''}"></label><label>Sale desde<input name="o_${key}_salida" value="${esc((d && d.salida) || (n === 1 ? c.salida || '' : ''))}" placeholder="Ej. Buenos Aires" class="${faltan.includes('salida') && !(d && d.salida) ? 'req' : ''}"></label></div>
+      ${d && d.fechas && !(d.desde && d.hasta) ? `<div class=mut style="font-size:12px">El cliente dijo: ${esc(d.fechas)}</div>` : ''}</div></div>`;
+    const activos = ds.filter(d => !['descartado', 'no_eligio'].includes(d.estado));
+    const opcionesHtml = `<style>.opcion{grid-column:1/-1}.o-sep{text-align:center;font-size:12px;font-weight:700;color:var(--coral);letter-spacing:.08em;margin:4px 0}.o-card{border:1px solid var(--linea);border-radius:14px;padding:14px;display:grid;gap:10px;background:#FFFCFB}.o-head{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;letter-spacing:.06em;color:#5A6670}.ciudad{display:flex;gap:8px;align-items:center}.ciudad .fl{width:20px;text-align:center;color:#376A89;font-weight:700}.ciudad input{flex:1}.ciudad input.dias{flex:0 0 72px;text-align:center}.mas{justify-self:start;margin-left:28px;border:1px dashed #376A89;background:#fff;color:#376A89;font-weight:600}.o-campos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.o-campos label,.persona{display:flex;flex-direction:column;gap:4px;margin:0}.persona input{width:110px}@media(max-width:700px){.o-campos{grid-template-columns:1fr 1fr}}</style>
+      <div style="grid-column:1/-1"${marca('destino')}><label>Destinos${ast('destino')} <span class=mut>(cada tarjeta es una opción de viaje y una cotización; los días son opcionales)</span></label></div>
+      <div id=opciones style="grid-column:1/-1;display:grid;gap:4px">${activos.length ? activos.map((d, i) => tarjetaOpcion(d.id, d, i + 1)).join('') : tarjetaOpcion('n0', null, 1)}</div>
+      <button type=button style="grid-column:1/-1" onclick="otraOpcion()">+ Otra opción (está eligiendo entre destinos)</button>
+      <template id=tpl-ciudad>${filaCiudad('KEY', { nombre: '', dias: '' }, 1)}</template><template id=tpl-opcion>${tarjetaOpcion('KEY', null, 99)}</template>
+      <script>let nOp=0;function otraCiudad(b){const card=b.closest('.opcion'),k=card.dataset.key;b.previousElementSibling.insertAdjacentHTML('beforeend',document.getElementById('tpl-ciudad').innerHTML.replaceAll('KEY',k))}
+      function otraOpcion(){const k='n'+(++nOp),box=document.getElementById('opciones'),n=box.querySelectorAll('.opcion').length+1;box.insertAdjacentHTML('beforeend',document.getElementById('tpl-opcion').innerHTML.replaceAll('KEY',k).replace('OPCIÓN 99','OPCIÓN '+n))}</script>`;
     const destinosHtml = `<div class="row" style="justify-content:space-between;margin:18px 0 8px"><h2>Destinos de esta consulta</h2>${c.tipo_destinos && ds.length > 1 ? `<span class=mut>${esc({ combinado: 'Un viaje que combina destinos', opciones: 'Está eligiendo entre destinos', distintos: 'Son viajes distintos', uno: '' }[c.tipo_destinos] || '')}</span>` : ''}</div>
       <div class="grid">${ds.map(tarjeta).join('') || '<div class="card mut">Todavía no hay destinos. La IA los crea al leer el chat, o agregalo abajo.</div>'}</div>
 `;
@@ -133,12 +150,10 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ${acc ? `<div class="card"><div class="row">${acc}</div></div>` : ''}
     ${destinosHtml}
     ${hilo}
-    <div class="grid"><div class="card" id=datos><h2>Lo que vale para toda la consulta</h2>${faltaHtml}<form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
+    <div class="grid"><div class="card" id=datos style="grid-column:1/-1"><h2>Lo que vale para toda la consulta</h2>${faltaHtml}<form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
     <div${marca('tipo')} style="grid-column:1/-1"><label>Tipo de consulta${ast('tipo')} <span class=mut>(se pueden elegir varios)</span></label><div class=row style="gap:6px 14px;flex-wrap:wrap;padding:6px 0">${[...new Set([...Object.keys(reglas.DEFAULTS.preguntas), ...reglas.serviciosDe(c)])].map(o => `<label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:500;color:var(--marino)"><input type=checkbox name=servicio value="${esc(o)}" style="width:auto"${reglas.serviciosDe(c).includes(o) ? ' checked' : ''}> ${esc(o)}</label>`).join('')}</div></div>
-    ${c.fase === 'lead' ? `<div style="grid-column:1/-1"${marca('destino') || marca('fechas') || marca('dias')}><label>Destinos${ast('destino')} <span class=mut>(uno o varios; fechas y días de cada uno)</span></label>
-      <table style="margin-top:4px"><tr><th>Destino</th><th>Fechas</th><th style="width:90px">Días</th></tr>${ds.filter(d => !['descartado', 'no_eligio'].includes(d.estado)).map(d => `<tr><td><input name="dn_${d.id}" value="${esc(d.nombre)}"></td><td><input name="df_${d.id}" value="${esc(d.fechas || '')}" placeholder="Ej. marzo 2027" class="${faltan.includes('fechas') && !d.fechas ? 'req' : ''}"></td><td><input name="dd_${d.id}" value="${d.dias ?? ''}" inputmode=numeric class="${faltan.includes('dias') && !Number(d.dias) ? 'req' : ''}"></td></tr>`).join('')}
-      <tr><td><input name=nuevo_nombre placeholder="${ds.length ? '+ Otro destino' : 'Ej. Brasil'}" class="${faltan.includes('destino') ? 'req' : ''}"></td><td><input name=nuevo_fechas placeholder="Fechas"></td><td><input name=nuevo_dias placeholder="Días" inputmode=numeric></td></tr></table></div>` : ''}
-    <div${marca('cuantos')}><label>Cuántos viajan${ast('cuantos')}</label><input name=cuantos value="${esc(c.cuantos)}"></div><div${marca('salida')}><label>Desde dónde salen${ast('salida')}</label><input name=salida value="${esc(c.salida)}"></div>
+    ${c.fase === 'lead' ? opcionesHtml : ''}
+    <div${marca('cuantos')} style="grid-column:1/-1"><label>Cuántos viajan${ast('cuantos')}</label><div class=row style="gap:12px"><label class=persona>Adultos<input name=adultos inputmode=numeric value="${c.adultos ?? ''}" class="${faltan.includes('cuantos') ? 'req' : ''}"></label><label class=persona>Menores de 18<input name=menores inputmode=numeric value="${c.menores ?? ''}"></label>${c.cuantos && !c.adultos ? `<span class=mut>El cliente dijo: ${esc(c.cuantos)}</span>` : ''}</div></div>
     <div${marca('presupuesto')}><label>Presupuesto${ast('presupuesto')}</label><input name=presupuesto value="${esc(c.presupuesto)}"></div><div><label>Cuándo confirma <span class=mut>(opcional)</span></label><input name=confirma value="${esc(c.confirma)}"></div><div><label>Ocasión especial <span class=mut>(opcional)</span></label><input name=ocasion value="${esc(c.ocasion)}" placeholder="Cumpleaños, luna de miel…"></div><div${marca('categoria')}><label>Categoría${ast('categoria')}</label><input name=categoria value="${esc(c.categoria)}" placeholder="Económico o business, tipo de hotel"></div>${c.atendio ? `<div><label>Atendió en la oficina</label><input value="${esc(c.atendio)}" disabled></div>` : ''}${c.fase === 'lead' ? `<input type=hidden name=total value="${c.total ?? ''}"><input type=hidden name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"><input type=hidden name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}">` : `<div><label>Total venta USD</label><input name=total value="${c.total ?? ''}"></div>
     <div><label>Sale</label><input type=date name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"></div><div><label>Vuelve</label><input type=date name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}"></div>`}
     <div style="grid-column:1/-1"><button class="p">Guardar</button></div></form></div>
@@ -153,16 +168,32 @@ module.exports = function (app, { wrap, page, log, hace }) {
   app.post('/caso/:id/datos', wrap(async (req, res) => {
     const b = req.body;
     b.servicio = [].concat(b.servicio || []).filter(Boolean).join(', ');
-    // destinos cargados en la misma tarjeta
+    // opciones de viaje (maqueta B): cada una con sus ciudades, desde–hasta y desde dónde sale
     const c0 = await one('select * from casos where id=$1', [req.params.id]);
-    for (const d of await q(`select * from destinos where caso_id=$1 and estado not in ('descartado','no_eligio')`, [req.params.id])) {
-      if (b['dn_' + d.id] === undefined) continue;
-      const nombre = String(b['dn_' + d.id]).trim() || d.nombre, fechas = n2(b['df_' + d.id]), dias = Number(b['dd_' + d.id]) || null;
-      if (nombre !== d.nombre || (fechas || null) !== (d.fechas || null) || dias !== (d.dias || null)) await q('update destinos set nombre=$1, fechas=$2, dias=$3 where id=$4', [nombre, fechas, dias, d.id]);
+    const existentes = await q(`select * from destinos where caso_id=$1 and estado not in ('descartado','no_eligio')`, [req.params.id]);
+    const claves = [...new Set(Object.keys(b).map(k => (k.match(/^o_([^_]+)_cn$/) || [])[1]).filter(Boolean))];
+    let primeraSalida = null;
+    for (const key of claves) {
+      const nombres = [].concat(b[`o_${key}_cn`] || []), dias = [].concat(b[`o_${key}_cd`] || []);
+      const ciudades = nombres.map((n, i) => ({ nombre: String(n).trim(), dias: Number(dias[i]) || null })).filter(x => x.nombre);
+      const ex = existentes.find(d => String(d.id) === key);
+      if (b[`o_${key}_quitar`]) { if (ex) { await q(`update destinos set estado='descartado' where id=$1`, [ex.id]); await log(c0.id, req.session.quien, 'Opción sacada: ' + ex.nombre + '.'); } continue; }
+      if (!ciudades.length) continue;
+      const desde = n2(b[`o_${key}_desde`]), hasta = n2(b[`o_${key}_hasta`]), salida = n2(b[`o_${key}_salida`]);
+      const nombre = ciudades.map(x => x.nombre).join(' + ');
+      const sumaDias = ciudades.reduce((t, x) => t + (x.dias || 0), 0) || (desde && hasta ? Math.round((new Date(hasta) - new Date(desde)) / 864e5) || null : null);
+      const fmt = d => new Date(d + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric', year: 'numeric' });
+      const fechas = desde && hasta ? `${fmt(desde)} al ${fmt(hasta)}` : ex?.fechas || null;
+      primeraSalida = primeraSalida || salida;
+      if (ex) await q('update destinos set nombre=$1, ciudades=$2, desde=$3, hasta=$4, salida=$5, fechas=$6, dias=coalesce($7, dias) where id=$8', [nombre, JSON.stringify(ciudades), desde, hasta, salida, fechas, sumaDias, ex.id]);
+      else { await q('insert into destinos(caso_id,nombre,ciudades,desde,hasta,salida,fechas,dias) values($1,$2,$3,$4,$5,$6,$7,$8)', [c0.id, nombre, JSON.stringify(ciudades), desde, hasta, salida, fechas, sumaDias]); await log(c0.id, req.session.quien, 'Destino agregado: ' + nombre + '.'); }
     }
-    const nuevo = String(b.nuevo_nombre || '').trim();
-    if (nuevo) { await q('insert into destinos(caso_id,nombre,fechas,dias) values($1,$2,$3,$4)', [req.params.id, nuevo, n2(b.nuevo_fechas), Number(b.nuevo_dias) || null]); await log(req.params.id, req.session.quien, 'Destino agregado: ' + nuevo + '.'); }
-    if (nuevo || !c0.destino) { const ns = await q(`select nombre from destinos where caso_id=$1 and estado not in ('descartado','no_eligio') order by id`, [req.params.id]); if (ns.length) await q('update casos set destino=$1 where id=$2', [ns.map(x => x.nombre).join(' / '), req.params.id]); }
+    const ns = await q(`select nombre from destinos where caso_id=$1 and estado not in ('descartado','no_eligio') order by id`, [c0.id]);
+    if (ns.length) await q('update casos set destino=$1 where id=$2', [ns.map(x => x.nombre).join(' / '), c0.id]);
+    // cuántos viajan: adultos y menores
+    const adultos = Number(b.adultos) || null, menores = Number(b.menores) || null;
+    if (b.adultos !== undefined) { b.cuantos = adultos ? `${adultos} adulto${adultos > 1 ? 's' : ''}${menores ? ` + ${menores} menor${menores > 1 ? 'es' : ''}` : ''}` : c0.cuantos; await q('update casos set adultos=$1, menores=$2 where id=$3', [adultos, menores, c0.id]); }
+    if (b.salida === undefined) b.salida = primeraSalida || c0.salida;
     await q('update casos set servicio=$1,cuantos=$2,salida=$3,presupuesto=$4,confirma=$5,total=$6,sale=$7,vuelve=$8,ocasion=$9,categoria=$10,actualizado=now() where id=$11', [n2(b.servicio), n2(b.cuantos), n2(b.salida), n2(b.presupuesto), n2(b.confirma), n2(b.total), n2(b.sale), n2(b.vuelve), n2(b.ocasion), n2(b.categoria), req.params.id]);
     await ia.ponerSemaforo(req.params.id).catch(() => {});
     res.redirect('/caso/' + req.params.id + '#datos');
