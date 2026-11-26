@@ -94,8 +94,8 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const marca = k => faltan.includes(k) ? ' class=falta' : '';
     const ast = k => pide.includes(k) ? ' *' : '';
     const faltaHtml = c.fase !== 'lead' ? '' : faltan.length
-      ? `<style>.falta input,.falta select{border-color:#D8626B;background:#FFF1F1}</style><div class="aviso rojo" style="margin:8px 0">Para cotizar falta: <b>${faltan.map(k => reglas.NOMBRE_DATO[k]).join(', ')}</b>.${faltan.some(k => ['destino', 'fechas', 'dias'].includes(k)) ? ' Destino, fechas y días se cargan en cada destino, arriba.' : ''} Hasta que esté todo no pasa a Para cotizar.</div>`
-      : '<div class="aviso" style="margin:8px 0">✓ Está todo lo necesario para cotizar.</div>';
+      ? `<style>.falta input,.falta select{border-color:#D8626B;background:#FFF1F1}</style><div class="aviso rojo" style="margin:8px 0;display:block">Para cotizar falta: <b>${faltan.map(k => reglas.NOMBRE_DATO[k]).join(', ')}</b>.${faltan.some(k => ['destino', 'fechas', 'dias'].includes(k)) ? ' Destino, fechas y días se cargan en cada destino, arriba.' : ''} Hasta que esté todo no pasa a Para cotizar.</div>`
+      : '<div class="aviso" style="margin:8px 0;display:block">✓ Está todo lo necesario para cotizar.</div>';
     const destinosHtml = `<div class="row" style="justify-content:space-between;margin:18px 0 8px"><h2>Destinos de esta consulta</h2>${c.tipo_destinos && ds.length > 1 ? `<span class=mut>${esc({ combinado: 'Un viaje que combina destinos', opciones: 'Está eligiendo entre destinos', distintos: 'Son viajes distintos', uno: '' }[c.tipo_destinos] || '')}</span>` : ''}</div>
       <div class="grid">${ds.map(tarjeta).join('') || '<div class="card mut">Todavía no hay destinos. La IA los crea al leer el chat, o agregalo abajo.</div>'}</div>
       ${c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/destino class="row" style="margin-top:8px"><input name=nombre placeholder="Agregar un destino a esta consulta (ej. Vietnam)" style="max-width:360px" required><button>+ Agregar destino</button></form>` : ''}`;
