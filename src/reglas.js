@@ -103,7 +103,6 @@ function evaluar(d, ctx, reglas) {
   else motivos.push('No dijo cuántos días: no se pudo comparar con el mínimo.');
   if (!d.fechas || VAGAS.test(norm(d.fechas))) { nivel = Math.min(nivel, 1); motivos.push('Fechas vagas.'); }
   if (ctx.soloPrecio) { nivel = Math.max(0, nivel - 1); motivos.push('Pidió "solo el precio".'); }
-  if (ctx.confirmaVago) { nivel = Math.min(nivel, 1); motivos.push('No dijo cuándo confirmaría.'); }
   if (ctx.recurrente && nivel === 0) { nivel = 1; motivos.push('Ya es cliente: nunca queda en rojo.'); }
   if (d.preferencia) motivos.push('Le tira más este destino.');
   return { semaforo: NIVEL[nivel], motivo: motivos.join(' ') };
