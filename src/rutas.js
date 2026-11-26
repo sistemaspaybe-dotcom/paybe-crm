@@ -43,11 +43,43 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const ventana = await enVentana(c.id);
 
     // barra de etapas
-    // cada etapa se puede tocar para pasar el lead a mano (Convertido no: se pasa con "Dijo que sí", que elige la cotización)
-    const barra = (lista, actual, previos = []) => `<style>.bar button.et{all:unset;display:block;width:100%;height:100%;cursor:pointer;text-align:center}.bar>form>div:hover{outline:2px solid var(--coral);outline-offset:-2px}</style><div class="bar">${previos.map(p => `<div class="ok">${p}</div>`).join('')}${lista.map(([k, n], i) => {
-      const idx = lista.findIndex(([x]) => x === actual), cls = i < idx ? 'ok' : i === idx ? 'now' : '', txt = `${n}${i < idx ? ' ✓' : ''}`;
-      return k === actual || k === 'convertido' ? `<div class="${cls}">${txt}</div>` : `<form method=post action=/caso/${c.id}/etapa style="display:contents"><div class="${cls}"><button class=et name=etapa value=${k} title="Pasar a ${esc(n)}">${txt}</button></div></form>`;
-    }).join('')}</div>`;
+    // barra de etapas (como el Path de Salesforce): tocar una etapa MUESTRA qué significa y qué pasó ahí, sin cambiarla.
+    // Para moverla, el botón "Pasar a esta etapa" del panel. Convertido no se mueve desde acá: va por "Dijo que sí", que elige la cotización.
+    const GUIA = {
+      nuevo: 'Escribió el cliente. Todavía nadie le pidió los datos para cotizar.',
+      preguntando: 'Hay que pedirle los datos que faltan para cotizar (la IA arma el mensaje con todo junto).',
+      aguardando: 'Ya se le pidieron los datos y estamos esperando que conteste. Si falta algo, se le repregunta solo eso.',
+      para_cotizar: 'Está todo lo necesario: hay que cotizar. El semáforo ayuda a priorizar.',
+      cotizando: 'Alguien del equipo está armando la cotización.',
+      esperando: 'Se le mandó la propuesta y esperamos su respuesta (sí, ajustes o no).',
+      recotizar: 'Dijo que sí, pero cambió el precio: hay que cargar la tarifa nueva y mandarla.',
+      convertido: 'Dijo que sí: pasa a Oportunidad. Se hace con "Dijo que sí" en "¿Qué contestó?", eligiendo la cotización.',
+      le_intereso: 'Dijo que sí: hay que mandarle los datos para la seña.', falta_sena: 'Se le mandaron los datos y falta que pague la seña.', sena_pagada: 'Pagó la seña: pasar a Venta.',
+      reservando: 'Hay que reservar todo (aéreos, hoteles, traslados).', saldo: 'Falta que pague el saldo (hasta 30 días antes de salir).', previaje: 'Todo pago: documentación y detalles antes del viaje.', viaja: 'Están de viaje.', fin: 'Volvieron: mandar la encuesta y pedir la reseña.',
+    };
+    const extraEtapa = k => {
+      const li = xs => xs.length ? `<ul style="margin:8px 0 0;padding-left:18px">${xs.join('')}</ul>` : '';
+      if (k === 'nuevo') { const m = msgs.find(x => x.entrante); return m ? `<p class=mut style="margin-top:8px">Primer mensaje: “${esc(String(m.texto || '').slice(0, 200))}”</p>` : ''; }
+      if (k === 'preguntando') return c.borrador_tipo === 'preguntas' ? `<p class=mut style="margin-top:8px">Hay un mensaje de preguntas armado para mandar (arriba).</p>` : c.preguntas_en ? `<p class=mut style="margin-top:8px">Las preguntas se mandaron el ${fecha(c.preguntas_en)}.</p>` : '';
+      if (k === 'aguardando' && c.fase === 'lead') { const f = reglas.faltanParaCotizar(c, ds); return f.length ? `<p style="margin-top:8px">Falta: <b>${f.map(x => reglas.NOMBRE_DATO[x]).join(', ')}</b>.</p>` : `<p style="margin-top:8px">✓ Ya está todo para cotizar.</p>`; }
+      if (k === 'para_cotizar') return li(ds.filter(d => d.semaforo).map(d => `<li>${esc(d.nombre)} ${{ verde: '🟢', amarillo: '🟡', rojo: '🔴' }[d.semaforo] || ''} <span class=mut>${esc(d.motivo || '')}</span></li>`));
+      if (k === 'cotizando') return li(cots.filter(x => x.estado === 'borrador').map(x => `<li>${esc(x.viaje || '')} v${x.version}${x.quien ? ' · ' + esc(x.quien) : ''}</li>`));
+      if (k === 'esperando' || k === 'recotizar') return li(cots.filter(x => x.estado === 'mandada').map(x => `<li>${esc(x.viaje || '')} v${x.version} · ${dinero(x.precio_pp, x.moneda)} pp${x.mandada ? ' · mandada el ' + fecha(x.mandada) : ''}${x.valida_hasta ? ' · vale hasta ' + fecha(x.valida_hasta) : ''}</li>`));
+      return '';
+    };
+    const barra = (lista, actual, previos = []) => {
+      const idx = lista.findIndex(([x]) => x === actual);
+      const panel = ([k, n]) => {
+        const hist = acts.filter(a => a.texto && a.texto.includes(n)).slice(0, 4);
+        const mover = k === actual ? `<span class="chip ve">Etapa actual</span>` : k === 'convertido' ? '' : `<form method=post action=/caso/${c.id}/etapa><input type=hidden name=etapa value=${k}><button class="p">Pasar a ${esc(n)}</button></form>`;
+        return `<div class="card paso" data-paso="${k}" style="${k === actual ? '' : 'display:none;'}margin-top:-4px"><div class="row" style="justify-content:space-between"><b style="font-size:16px">${esc(n)}</b>${mover}</div>
+          <p style="margin-top:6px">${esc(GUIA[k] || '')}</p>${extraEtapa(k)}${hist.length ? `<div class=mut style="margin-top:8px;font-size:13px">${hist.map(a => `${fecha(a.creada)} · ${esc(a.quien)}: ${esc(a.texto)}`).join('<br>')}</div>` : ''}</div>`;
+      };
+      return `<style>.bar button.et{all:unset;display:block;width:100%;height:100%;cursor:pointer;text-align:center;box-sizing:border-box}.bar>div:has(button.et):hover,.bar>div.sel{outline:2px solid var(--coral);outline-offset:-2px}</style>
+      <div class="bar">${previos.map(p => `<div class="ok">${p}</div>`).join('')}${lista.map(([k, n], i) => `<div class="${i < idx ? 'ok' : i === idx ? 'now' : ''}${k === actual ? ' sel' : ''}" data-et="${k}"><button type=button class=et onclick="verPaso('${k}')" title="Ver ${esc(n)}">${n}${i < idx ? ' ✓' : ''}</button></div>`).join('')}</div>
+      ${lista.map(panel).join('')}
+      <script>function verPaso(k){document.querySelectorAll('.paso').forEach(p=>p.style.display=p.dataset.paso===k?'':'none');document.querySelectorAll('.bar>div[data-et]').forEach(d=>d.classList.toggle('sel',d.dataset.et===k))}</script>`;
+    };
     let bar = '';
     if (c.fase === 'lead') bar = barra([...Object.entries(FASES.lead.etapas), ['convertido', 'Convertido']], c.etapa);
     else if (c.fase === 'oportunidad') bar = barra(Object.entries(FASES.oportunidad.etapas), c.etapa, ['Lead · Convertido ✓']);
