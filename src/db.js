@@ -92,6 +92,7 @@ alter table cotizaciones add column if not exists moneda text default 'USD';
 alter table cotizaciones alter column sena_pct set default 50;
 alter table pagos add column if not exists moneda text default 'USD';
 alter table pagos add column if not exists comprobante boolean default true;
+alter table personas add column if not exists personal boolean default false;
 `;
 // cambios de etapas de una sola vez (17/11): Mandada pasa a Esperando respuesta; el viejo Preguntando (ya contestaron) es Aguardando datos
 async function migrar() {

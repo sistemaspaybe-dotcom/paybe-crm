@@ -66,6 +66,7 @@ async function registrar({ igsid, username, nombre, mid, entrante, texto, cuando
       on conflict (instagram_id) do update set instagram_user=coalesce(excluded.instagram_user, personas.instagram_user) returning *`,
       [nombre || (username ? '@' + username : 'Instagram ' + String(igsid).slice(-4)), String(igsid), username || null]);
   } else if (username && !p.instagram_user) await q('update personas set instagram_user=$1 where id=$2', [username, p.id]);
+  if (p.personal) return false; // cuenta marcada como personal: no se guarda nada
   // el mismo mensaje puede llegar por los dos caminos con distinto identificador
   if (await one(`select 1 from mensajes where persona_id=$1 and entrante=$2 and texto=$3 and abs(extract(epoch from creado - $4::timestamptz)) < 5`, [p.id, entrante, texto, cuando])) return;
 

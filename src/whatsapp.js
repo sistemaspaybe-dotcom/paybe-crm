@@ -40,6 +40,7 @@ async function registrar({ tel, nombre, mid, entrante, texto, cuando }) {
     if (!entrante) return false; // un mensaje de Sol a alguien que todavía no escribió no crea nada
     p = await one(`insert into personas(nombre,origen,whatsapp) values($1,'WhatsApp',$2) returning *`, [nombre || '+' + digitos(tel), '+' + digitos(tel)]);
   } else if (nombre && /^\+?\d[\d\s]*$/.test(p.nombre)) await q('update personas set nombre=$1 where id=$2', [nombre, p.id]);
+  if (p.personal) return false; // número marcado como personal: no se guarda nada
 
   let c = await one(`select * from casos where persona_id=$1 and fase<>'baja' and not (fase='venta' and etapa='fin') order by creado desc limit 1`, [p.id]);
   const ins = await one('insert into mensajes(persona_id,caso_id,canal,mid,entrante,texto,creado) values($1,$2,$3,$4,$5,$6,$7) on conflict (mid) do nothing returning id', [p.id, c?.id || null, 'whatsapp', mid, entrante, texto, cuando]);

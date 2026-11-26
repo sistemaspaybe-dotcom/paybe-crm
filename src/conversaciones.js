@@ -77,6 +77,8 @@ async function sinContestar() {
     where cv.cerrada is null and lm.entrante order by lm.creado limit 20`);
 }
 
+// marcar como personal: borra lo guardado y ese contacto no vuelve a entrar
+const BOTON_PERSONAL = id => `<form method=post action=/persona/${id}/personal onsubmit="return confirm('¿Es un contacto personal? Se borran sus mensajes del CRM y no vuelve a entrar nada de este contacto.')"><button>Personal</button></form>`;
 const hora = d => new Date(d).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' });
 
 // pestañas de arriba de Leads
@@ -100,7 +102,7 @@ function rutas(app, { wrap, page, log, ig }) {
     page(req, res, 'Filtrados', `${await encabezado('filtrados', nLeads, rows.length)}
     <p class=mut>Mensajes que no son consultas: reacciones a historias, reels, menciones, proveedores. No hace falta mirarlos. Si alguno sí era una consulta, tocá "Es consulta" y pasa a Leads.</p>
     <div class="card"><table>${rows.map(r => `<tr><td><b>${icono(r.canal)} ${esc(r.nombre)}</b>${r.instagram_user ? ` <span class=mut>@${esc(r.instagram_user)}</span>` : ''}<div class=mut>${esc((r.texto || '').slice(0, 140))}${r.n > 1 ? ` · ${r.n} mensajes` : ''}</div><div class=mut style="font-size:12px">${hora(r.ult_en)} · lo filtró ${por(r)}</div></td>
-      <td style="text-align:right"><form method=post action=/conversacion/${r.id}/es-consulta><button>Es consulta</button></form></td></tr>`).join('') || '<tr><td class=mut>No hay nada filtrado.</td></tr>'}</table></div>`, '/leads');
+      <td style="text-align:right"><div class=row style="justify-content:flex-end"><form method=post action=/conversacion/${r.id}/es-consulta><button>Es consulta</button></form>${BOTON_PERSONAL(r.persona_id)}</div></td></tr>`).join('') || '<tr><td class=mut>No hay nada filtrado.</td></tr>'}</table></div>`, '/leads');
   }));
   app.post('/conversacion/:id/es-consulta', wrap(async (req, res) => {
     const cv = await one('select * from conversaciones where id=$1', [req.params.id]); if (!cv) return res.redirect('/leads/filtrados');
@@ -110,6 +112,21 @@ function rutas(app, { wrap, page, log, ig }) {
   app.post('/caso/:id/no-es-consulta', wrap(async (req, res) => {
     await filtrarCaso(req.params.id, req.session.quien);
     res.redirect('/leads');
+  }));
+
+  // ---- personal: Sol usa su número también para lo personal. Se marca una vez y ese contacto no vuelve a entrar ----
+  app.post('/persona/:id/personal', wrap(async (req, res) => {
+    const p = await one('select * from personas where id=$1', [req.params.id]); if (!p) return res.redirect('/leads');
+    if (await one(`select 1 from casos where persona_id=$1 and fase in ('oportunidad','venta')`, [p.id])) return res.redirect(req.get('referer') || '/leads');
+    await q('delete from mensajes where persona_id=$1', [p.id]);
+    await q('delete from conversaciones where persona_id=$1', [p.id]);
+    await q(`delete from casos where persona_id=$1 and fase in ('lead','baja') and not exists (select 1 from cotizaciones k where k.caso_id=casos.id and k.estado<>'borrador')`, [p.id]);
+    await q(`update personas set personal=true, notas=null where id=$1`, [p.id]);
+    res.redirect('/leads?personal=1');
+  }));
+  app.post('/persona/:id/no-personal', wrap(async (req, res) => {
+    await q('update personas set personal=false where id=$1', [req.params.id]);
+    res.redirect('/ajustes#personales');
   }));
 
   // ---- contestar desde la ficha (Instagram o WhatsApp, dentro de las 24 h) ----
@@ -137,4 +154,4 @@ async function limpiarViejos() {
   await q("insert into ajustes(clave,valor) values('migracion_filtro_2611', now()::text)");
 }
 
-module.exports = { tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };
+module.exports = { BOTON_PERSONAL, tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };

@@ -55,7 +55,7 @@ async function lista(req, res, fase, titulo, ruta) {
   if (fase === 'lead') rows.sort((a, b) => (conv.estadoChat(b) === 'te_toca' || conv.estadoChat(b) === 'nueva') - (conv.estadoChat(a) === 'te_toca' || conv.estadoChat(a) === 'nueva'));
   const orden = Object.keys(FASES[fase].etapas);
   const porEtapa = orden.map(e => `<span class="chip">${FASES[fase].etapas[e]} · ${rows.filter(r => r.etapa === e).length}</span>`).join(' ');
-  const tabs = fase === 'lead' ? await conv.encabezado('leads', rows.length) : `<h1>${titulo} · ${rows.length}</h1>`;
+  const tabs = (fase === 'lead' ? await conv.encabezado('leads', rows.length) : `<h1>${titulo} · ${rows.length}</h1>`) + (req.query.personal ? '<div class="aviso">Listo: marcado como personal. Se borraron sus mensajes y no vuelve a entrar nada de ese contacto. Se puede deshacer en Ajustes.</div>' : '');
   page(req, res, titulo, `${tabs}<p>${porEtapa}</p><div class="card"><table><tr><th>Persona</th><th>Etapa</th><th>Servicio</th><th>Viaje</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
 }
 conv.rutas(app, { wrap, page, log, ig });
@@ -140,7 +140,7 @@ app.post('/caso/:id/:accion', wrap(async (req, res, next) => {
 // ---- personas ----
 app.get('/personas', wrap(async (req, res) => {
   const s = '%' + (req.query.q || '') + '%';
-  const rows = await q(`select p.*, (select count(*) from casos where persona_id=p.id) casos, (select count(*) from casos where persona_id=p.id and fase='venta' and etapa='fin') viajes from personas p where nombre ilike $1 or coalesce(whatsapp,'') ilike $1 order by creada desc`, [s]);
+  const rows = await q(`select p.*, (select count(*) from casos where persona_id=p.id) casos, (select count(*) from casos where persona_id=p.id and fase='venta' and etapa='fin') viajes from personas p where not personal and (nombre ilike $1 or coalesce(whatsapp,'') ilike $1) order by creada desc`, [s]);
   page(req, res, 'Personas', `<h1>Personas · ${rows.length}</h1><form class="row" style="margin:10px 0"><input name=q value="${esc(req.query.q || '')}" placeholder="Buscar por nombre o WhatsApp" style="max-width:340px"><button>Buscar</button></form>
   <div class="card"><table><tr><th>Nombre</th><th>WhatsApp</th><th>Origen</th><th>Consultas</th><th>Viajes</th></tr>${rows.map(p => `<tr><td><a href="/persona/${p.id}"><b>${esc(p.nombre)}</b></a></td><td>${esc(p.whatsapp)}</td><td>${esc(p.origen)}</td><td>${p.casos}</td><td>${p.viajes}</td></tr>`).join('')}</table></div>`, '/personas');
 }));
