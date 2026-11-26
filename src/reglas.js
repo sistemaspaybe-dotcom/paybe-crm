@@ -31,7 +31,7 @@ const DEFAULTS = {
     saldo_30: '¡Hola {nombre}! Faltan 30 días para {destino}. Hoy vence el plazo del saldo: sin el pago se pierden las reservas. ¿Lo coordinamos?',
   },
   // borrador con lo que dijo Sol (24/11): que lo lea ella antes de que salga en las propuestas
-  bases: 'Para reservar se abona una seña del 50% del total. El saldo se completa hasta 30 días antes de la salida; sin ese pago se pierden las reservas. Los aéreos son intransferibles y, una vez emitidos, no tienen devolución. Los hoteles se reservan con tarifa cancelable según las condiciones de cada uno. Las tarifas están sujetas a disponibilidad hasta el momento de la reserva y valen hasta la fecha indicada en la propuesta.',
+  bases: 'Para reservar se abona una seña del 50% del total. El saldo se completa hasta 30 días antes de la salida; sin ese pago se pierden las reservas. Los aéreos son intransferibles y, una vez emitidos, no tienen devolución; cualquier cambio está sujeto a penalidad y a la diferencia de tarifa. Los hoteles se reservan con tarifa cancelable según las condiciones de cada uno. Las tarifas están sujetas a disponibilidad hasta el momento de la reserva y valen hasta la fecha indicada en la propuesta.',
 };
 const ETIQUETAS_MENSAJES = { presupuesto_bajo: 'Presupuesto bajo (semáforo rojo)', sena: 'La seña no llega (a los 3 días)', comprobante: 'Pedir el comprobante', saldo_60: 'Saldo: 2 meses antes', saldo_30: 'Saldo: 1 mes antes' };
 const completar = (t, v) => String(t || '').replace(/\{(\w+)\}/g, (m, k) => v[k] ?? m);
