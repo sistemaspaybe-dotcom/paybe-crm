@@ -317,6 +317,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
       if (orden.indexOf(e) >= orden.indexOf('para_cotizar') && reglas.faltanParaCotizar(c, ds).length) return res.redirect(`/caso/${c.id}?falta=1#datos`);
     }
     await q('update casos set etapa=$1, actualizado=now() where id=$2', [e, c.id]);
+    if (e !== 'para_cotizar') await q(`update avisos set hecho=true where caso_id=$1 and texto='Está para cotizar'`, [c.id]);
     await log(c.id, req.session.quien, `Lo pasó a mano de ${etapas[c.etapa] || c.etapa} a ${etapas[e]}.`);
     if (c.fase === 'lead' && e === 'para_cotizar') await ia.ponerSemaforo(c.id).catch(() => {});
     res.redirect('/caso/' + c.id);
@@ -371,6 +372,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
         [c.id, d.id, d.nombre, d.fechas, c.cuantos, ver, JSON.stringify(base?.items || []), base?.sena_pct ?? 50, base?.no_incluye || 'Comidas no mencionadas, propinas, gastos personales, visa si corresponde', base?.id || null, req.session.quien, base?.moneda || (reglas.esArgentina(d.nombre) ? 'ARS' : 'USD')]);
       await q(`update destinos set estado='cotizando' where id=$1`, [d.id]);
       if (c.fase === 'lead') await q(`update casos set etapa='cotizando', cotizando_por=$1, cotizando_desde=now(), actualizado=now() where id=$2`, [req.session.quien, c.id]);
+      await q(`update avisos set hecho=true where caso_id=$1 and texto='Está para cotizar'`, [c.id]);
       await log(c.id, req.session.quien, `Empezó a cotizar ${d.nombre} (v${ver})${base ? ' usando una cotización guardada como base' : ''}.`);
     } else if (req.query.base) {
       const base = await one('select * from cotizaciones where id=$1', [req.query.base]);

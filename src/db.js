@@ -103,6 +103,13 @@ alter table destinos add column if not exists fechas_tipo text;
 alter table destinos add column if not exists mes text;
 alter table casos add column if not exists adultos int;
 alter table casos add column if not exists menores int;
+-- un aviso pendiente no se repite: si ya hay uno igual para la misma consulta, no se crea otro
+delete from avisos a using avisos b where not a.hecho and not b.hecho and a.caso_id=b.caso_id and a.texto=b.texto and a.id>b.id;
+create or replace function aviso_sin_repetir() returns trigger as $f$ begin
+  if exists (select 1 from avisos where caso_id=new.caso_id and texto=new.texto and not hecho) then return null; end if;
+  return new; end $f$ language plpgsql;
+drop trigger if exists aviso_sin_repetir on avisos;
+create trigger aviso_sin_repetir before insert on avisos for each row execute function aviso_sin_repetir();
 `;
 // cambios de etapas de una sola vez (17/11): Mandada pasa a Esperando respuesta; el viejo Preguntando (ya contestaron) es Aguardando datos
 async function migrar() {
