@@ -34,17 +34,19 @@ function esRuido(texto) {
   return (historia && sinAdjuntos.length <= 60) || (sinAdjuntos.length <= 30 && REACCION.test(sinAdjuntos));
 }
 
-async function filtrarConversacion(personaId, canal, quien) {
-  await q(`update conversaciones set cerrada='filtrado', cerrada_en=now(), cerrada_por=$3 where persona_id=$1 and canal=$2`, [personaId, canal, quien]);
+// por qué se filtró (lo elige el equipo con el botón Filtrar; la regla y la IA ponen "No es una consulta")
+const MOTIVOS_FILTRO = { no_consulta: 'No es una consulta', proveedor: 'Proveedor u otra agencia', spam: 'Spam o publicidad' };
+async function filtrarConversacion(personaId, canal, quien, motivo = 'no_consulta') {
+  await q(`update conversaciones set cerrada='filtrado', cerrada_en=now(), cerrada_por=$3, motivo=$4 where persona_id=$1 and canal=$2`, [personaId, canal, quien, motivo]);
 }
 // la IA o el equipo dicen que un lead no era consulta: sale de Leads y va a Filtrados
-async function filtrarCaso(casoId, quien) {
+async function filtrarCaso(casoId, quien, motivo = 'no_consulta') {
   const c = await one('select * from casos where id=$1', [casoId]); if (!c || c.fase !== 'lead') return;
   await q(`update casos set fase='baja', etapa='baja', baja_desde='lead', motivo_baja='No es consulta', borrador=null, borrador_tipo=null, actualizado=now() where id=$1`, [c.id]);
   await q('update avisos set hecho=true where caso_id=$1', [c.id]);
   const canales = await q('select distinct canal from mensajes where caso_id=$1', [c.id]);
-  for (const { canal } of canales) await filtrarConversacion(c.persona_id, canal, quien);
-  await q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [c.id, quien, 'No es consulta: pasa a Filtrados.']);
+  for (const { canal } of canales) await filtrarConversacion(c.persona_id, canal, quien, motivo);
+  await q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [c.id, quien, `${MOTIVOS_FILTRO[motivo] || 'No es una consulta'}: pasa a Filtrados.`]);
 }
 
 // crea el lead para la consulta de una persona (o recupera el que estaba filtrado) y la IA arranca a leer
@@ -77,6 +79,12 @@ async function sinContestar() {
     where cv.cerrada is null and lm.entrante order by lm.creado limit 20`);
 }
 
+// botón Filtrar de la ficha: un desplegable con el porqué
+const BOTON_FILTRAR = casoId => `<details class=filtrar style="position:relative"><summary class="btn" style="list-style:none;cursor:pointer">Filtrar ▾</summary>
+  <form method=post action=/caso/${casoId}/filtrar style="position:absolute;right:0;top:calc(100% + 6px);z-index:5;background:#fff;border:1px solid var(--linea);border-radius:12px;padding:8px;display:grid;gap:6px;min-width:260px;box-shadow:0 6px 20px rgba(31,58,77,.12)">
+  <span class=mut style="padding:2px 6px">¿Por qué no va a Leads?</span>
+  ${Object.entries({ ...MOTIVOS_FILTRO, personal: 'Personal (de Sol)' }).map(([k, t]) => `<button name=motivo value=${k} style="text-align:left"${k === 'personal' ? ` onclick="return confirm('¿Es un contacto personal? Se borran sus mensajes del CRM y no vuelve a entrar nada de este contacto.')"` : ''}>${t}</button>`).join('')}
+  <span class=mut style="padding:2px 6px;font-size:12px">Personal borra sus mensajes y no vuelve a entrar. Lo demás va a Filtrados y se puede recuperar.</span></form></details>`;
 // marcar como personal: borra lo guardado y ese contacto no vuelve a entrar
 const BOTON_PERSONAL = id => `<form method=post action=/persona/${id}/personal onsubmit="return confirm('¿Es un contacto personal? Se borran sus mensajes del CRM y no vuelve a entrar nada de este contacto.')"><button>Personal</button></form>`;
 const hora = d => new Date(d).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' });
@@ -101,7 +109,7 @@ function rutas(app, { wrap, page, log, ig }) {
     const por = r => r.cerrada_por === 'IA' ? 'la IA' : r.cerrada_por === 'Regla' ? 'el filtro automático' : esc(r.cerrada_por || '—');
     page(req, res, 'Filtrados', `${await encabezado('filtrados', nLeads, rows.length)}
     <p class=mut>Mensajes que no son consultas: reacciones a historias, reels, menciones, proveedores. No hace falta mirarlos. Si alguno sí era una consulta, tocá "Es consulta" y pasa a Leads.</p>
-    <div class="card"><table>${rows.map(r => `<tr><td><b>${icono(r.canal)} ${esc(r.nombre)}</b>${r.instagram_user ? ` <span class=mut>@${esc(r.instagram_user)}</span>` : ''}<div class=mut>${esc((r.texto || '').slice(0, 140))}${r.n > 1 ? ` · ${r.n} mensajes` : ''}</div><div class=mut style="font-size:12px">${hora(r.ult_en)} · lo filtró ${por(r)}</div></td>
+    <div class="card"><table>${rows.map(r => `<tr><td><b>${icono(r.canal)} ${esc(r.nombre)}</b>${r.instagram_user ? ` <span class=mut>@${esc(r.instagram_user)}</span>` : ''}<div class=mut>${esc((r.texto || '').slice(0, 140))}${r.n > 1 ? ` · ${r.n} mensajes` : ''}</div><div class=mut style="font-size:12px">${hora(r.ult_en)} · ${esc(MOTIVOS_FILTRO[r.motivo] || 'No es una consulta')} · lo filtró ${por(r)}</div></td>
       <td style="text-align:right"><div class=row style="justify-content:flex-end"><form method=post action=/conversacion/${r.id}/es-consulta><button>Es consulta</button></form>${BOTON_PERSONAL(r.persona_id)}</div></td></tr>`).join('') || '<tr><td class=mut>No hay nada filtrado.</td></tr>'}</table></div>`, '/leads');
   }));
   app.post('/conversacion/:id/es-consulta', wrap(async (req, res) => {
@@ -112,6 +120,13 @@ function rutas(app, { wrap, page, log, ig }) {
   app.post('/caso/:id/no-es-consulta', wrap(async (req, res) => {
     await filtrarCaso(req.params.id, req.session.quien);
     res.redirect('/leads');
+  }));
+  // botón Filtrar de la ficha: elige el porqué
+  app.post('/caso/:id/filtrar', wrap(async (req, res, next) => {
+    const c = await one('select * from casos where id=$1', [req.params.id]); if (!c) return res.redirect('/leads');
+    if (req.body.motivo === 'personal') { req.url = `/persona/${c.persona_id}/personal`; return next('route'); }
+    await filtrarCaso(c.id, req.session.quien, MOTIVOS_FILTRO[req.body.motivo] ? req.body.motivo : 'no_consulta');
+    res.redirect('/leads?filtrado=1');
   }));
 
   // ---- personal: Sol usa su número también para lo personal. Se marca una vez y ese contacto no vuelve a entrar ----
@@ -154,4 +169,4 @@ async function limpiarViejos() {
   await q("insert into ajustes(clave,valor) values('migracion_filtro_2611', now()::text)");
 }
 
-module.exports = { BOTON_PERSONAL, tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };
+module.exports = { BOTON_PERSONAL, BOTON_FILTRAR, MOTIVOS_FILTRO, tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };

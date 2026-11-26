@@ -55,7 +55,7 @@ async function lista(req, res, fase, titulo, ruta) {
   if (fase === 'lead') rows.sort((a, b) => (conv.estadoChat(b) === 'te_toca' || conv.estadoChat(b) === 'nueva') - (conv.estadoChat(a) === 'te_toca' || conv.estadoChat(a) === 'nueva'));
   const orden = Object.keys(FASES[fase].etapas);
   const porEtapa = orden.map(e => `<span class="chip">${FASES[fase].etapas[e]} · ${rows.filter(r => r.etapa === e).length}</span>`).join(' ');
-  const tabs = (fase === 'lead' ? await conv.encabezado('leads', rows.length) : `<h1>${titulo} · ${rows.length}</h1>`) + (req.query.personal ? '<div class="aviso">Listo: marcado como personal. Se borraron sus mensajes y no vuelve a entrar nada de ese contacto. Se puede deshacer en Ajustes.</div>' : '');
+  const tabs = (fase === 'lead' ? await conv.encabezado('leads', rows.length) : `<h1>${titulo} · ${rows.length}</h1>`) + (req.query.personal ? '<div class="aviso">Listo: marcado como personal. Se borraron sus mensajes y no vuelve a entrar nada de ese contacto. Se puede deshacer en Ajustes.</div>' : '') + (req.query.filtrado ? '<div class="aviso">Listo: pasó a Filtrados. Si fue un error, en Filtrados está "Es consulta".</div>' : '');
   page(req, res, titulo, `${tabs}<p>${porEtapa}</p><div class="card"><table><tr><th>Persona</th><th>Etapa</th><th>Servicio</th><th>Viaje</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
 }
 conv.rutas(app, { wrap, page, log, ig });
