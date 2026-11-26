@@ -1,6 +1,7 @@
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fecha = d => d ? new Date(d).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '';
 const usd = n => n == null || n === '' ? '—' : 'USD ' + Number(n).toLocaleString('es-AR');
+const dinero = (n, mon) => n == null || n === '' ? '—' : (mon === 'ARS' ? '$ ' : 'USD ') + Math.round(Number(n)).toLocaleString('es-AR');
 const CSS = `
 :root{--coral:#D8626B;--coral2:#B84A53;--azul:#2B5C7A;--marino:#1F3A4D;--verde:#1E5A3A;--bruma:#FBF0EC;--linea:#E8DCD6}
 *{box-sizing:border-box}body{margin:0;background:var(--bruma);color:var(--marino);font:15px/1.45 Figtree,system-ui,sans-serif}
@@ -31,4 +32,4 @@ function layout(titulo, body, { quien, activo } = {}) {
 <main>${body}</main></body></html>`;
 }
 const chipFase = f => `<span class="chip ${{ oportunidad: 'op', venta: 've', baja: 'ba' }[f] || ''}">`;
-module.exports = { esc, fecha, usd, layout, chipFase };
+module.exports = { esc, fecha, usd, dinero, layout, chipFase };

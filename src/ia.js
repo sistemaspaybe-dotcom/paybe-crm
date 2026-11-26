@@ -52,7 +52,8 @@ ${Object.entries(R.preguntas).map(([t, l]) => `- ${t}: ${l.join('; ')}`).join('\
 Devolvé SOLO un JSON con esta forma (null cuando el cliente no lo dijo; no inventes):
 {"tipo": uno de ${JSON.stringify(Object.keys(R.preguntas))},
  "caso": "uno" (un destino) | "combinado" (varios destinos en el mismo viaje) | "opciones" (está eligiendo entre destinos) | "distintos" (viajes distintos en fechas distintas),
- "cuantos": texto corto, "salida": ciudad de salida, "presupuesto": como lo dijo, "presupuesto_usd": número por persona en dólares o null, "confirma": cuándo quiere confirmar, "whatsapp": teléfono, "mail": mail,
+ "cuantos": texto corto, "salida": ciudad de salida, "presupuesto": como lo dijo, "presupuesto_usd": número por persona en dólares o null, "confirma": cuándo quiere confirmar,
+ "ocasion": si es por algo especial (cumpleaños, luna de miel, aniversario, viaje soñado), "categoria": qué categoría busca (aéreo económico o business, tipo de alojamiento), "whatsapp": teléfono, "mail": mail,
  "destinos": [{"nombre": destino corto (un viaje combinado va como UN destino, ej. "Japón + China"), "fechas": como lo dijo, "dias": número o null, "detalle": qué quiere ver o hacer, "presupuesto_usd": número por persona si es distinto para este destino, o null, "preferencia": true si dijo que este le tira más}],
  "solo_precio": true si pidió solo el precio o dijo que está comparando en varios lados,
  "faltan": [lo que falta de la lista de su tipo],
@@ -67,9 +68,9 @@ ${hilo}
 
   // lo común, en la consulta
   const tipo = Object.keys(R.preguntas).includes(d.tipo) ? d.tipo : null;
-  const comunes = { servicio: tipo, cuantos: txt(d.cuantos), salida: txt(d.salida), presupuesto: txt(d.presupuesto), confirma: txt(d.confirma), tipo_destinos: ['uno', 'combinado', 'opciones', 'distintos'].includes(d.caso) ? d.caso : null };
+  const comunes = { servicio: tipo, cuantos: txt(d.cuantos), salida: txt(d.salida), presupuesto: txt(d.presupuesto), confirma: txt(d.confirma), ocasion: txt(d.ocasion), categoria: txt(d.categoria), tipo_destinos: ['uno', 'combinado', 'opciones', 'distintos'].includes(d.caso) ? d.caso : null };
   const puestos = [];
-  for (const [k, v] of Object.entries(comunes)) if (v && v !== c[k]) { await q(`update casos set ${k}=$1 where id=$2`, [v, c.id]); if (!c[k] && k !== 'tipo_destinos') puestos.push({ servicio: 'tipo', cuantos: 'cuántos', confirma: 'cuándo confirma' }[k] || k); c[k] = v; }
+  for (const [k, v] of Object.entries(comunes)) if (v && v !== c[k]) { await q(`update casos set ${k}=$1 where id=$2`, [v, c.id]); if (!c[k] && k !== 'tipo_destinos') puestos.push({ servicio: 'tipo', cuantos: 'cuántos', confirma: 'cuándo confirma', ocasion: 'ocasión especial', categoria: 'categoría' }[k] || k); c[k] = v; }
   const senales = d.solo_precio ? 'solo_precio' : null;
   if (senales !== c.senales) await q('update casos set senales=$1 where id=$2', [senales, c.id]);
   const tel = (txt(d.whatsapp) || '').replace(/[^\d+]/g, ''), mail = txt(d.mail);

@@ -78,6 +78,20 @@ alter table cotizaciones add column if not exists quien text;
 create unique index if not exists cotizaciones_token on cotizaciones(token);
 update cotizaciones set estado='mandada' where estado is null;
 alter table cotizaciones alter column estado set default 'borrador';
+create table if not exists conversaciones (
+  id serial primary key, persona_id int references personas(id) on delete cascade, canal text not null,
+  cerrada text, cerrada_en timestamptz, cerrada_por text, ultimo_en timestamptz default now(), creada timestamptz default now(),
+  unique (persona_id, canal));
+insert into conversaciones(persona_id, canal, ultimo_en) select persona_id, canal, max(creado) from mensajes where persona_id is not null group by 1,2 on conflict do nothing;
+alter table casos add column if not exists ocasion text;
+alter table casos add column if not exists categoria text;
+alter table casos add column if not exists atendio text;
+alter table casos add column if not exists datos_sena_en timestamptz;
+alter table casos add column if not exists sena_seguimiento_en timestamptz;
+alter table cotizaciones add column if not exists moneda text default 'USD';
+alter table cotizaciones alter column sena_pct set default 50;
+alter table pagos add column if not exists moneda text default 'USD';
+alter table pagos add column if not exists comprobante boolean default true;
 `;
 // cambios de etapas de una sola vez (17/11): Mandada pasa a Esperando respuesta; el viejo Preguntando (ya contestaron) es Aguardando datos
 async function migrar() {

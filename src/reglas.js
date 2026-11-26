@@ -4,7 +4,7 @@ const { q, one } = require('./db');
 
 const DEFAULTS = {
   preguntas: {
-    'Viaje a medida': ['Para cuándo y cuántos días', 'Cuántos viajan (y si hay menores)', 'Presupuesto aproximado por persona', 'Desde dónde salen', 'Para cuándo querrían tenerlo confirmado'],
+    'Viaje a medida': ['Para cuándo y cuántos días', 'Cuántos viajan (y si hay menores)', 'Presupuesto aproximado por persona', 'Desde dónde salen', 'Para cuándo querrían tenerlo confirmado', 'Si es por una ocasión especial (cumpleaños, luna de miel, viaje soñado)', 'Qué categoría buscan (aéreo económico o business, tipo de alojamiento)'],
     'Aéreo': ['Origen y destino', 'Fechas de ida y vuelta', 'Cuántos pasajeros', 'Si llevan valija en bodega'],
     'Hotel': ['Destino y fechas', 'Cuántas habitaciones y personas', 'Qué categoría buscan'],
     'Visa': ['Qué país', 'Cuándo viajan', 'Si tienen pasaporte vigente', 'Si es la primera vez que la tramitan'],
@@ -22,7 +22,20 @@ const DEFAULTS = {
     ['Perú y Sudamérica', 'peru, perú, cusco, machu picchu, chile, colombia, cartagena, bolivia, uruguay', 500, 100],
   ],
   cortes: { verde: 100, rojo: 75, alta: 20, mesesAlta: [12, 1, 7] },
+  // mensajes armados (24/11). {nombre}, {destino}, {minimo}, {medio} se reemplazan solos
+  mensajes: {
+    presupuesto_bajo: '¡Hola {nombre}! Gracias por escribirnos 😊 En Paybe cuidamos mucho la calidad de cada viaje (hoteles, traslados, asistencia y que todo salga bien), y para {destino} en esas fechas eso arranca en {minimo} por persona. Te proponemos tres caminos: sumar un poco al presupuesto, hacerlo con menos días, o pensar otro destino que con lo que tenés en mente te dé un viajazo. ¿Cuál te cierra más?',
+    sena: '¡Hola {nombre}! ¿Cómo va? Te escribo para saber si siguen con la idea de {destino}. Las tarifas tienen validez limitada, así que si quieren avanzar avisanos y lo reservamos.',
+    comprobante: '¡Hola {nombre}! Gracias por el pago 🙌 ¿Nos mandás el comprobante de la {medio} así lo dejamos registrado?',
+    saldo_60: '¡Hola {nombre}! Ya falta poco para {destino} ✈️ Te recordamos que el saldo del viaje se completa hasta 30 días antes de la salida: queda el último mes. Cualquier duda, escribinos.',
+    saldo_30: '¡Hola {nombre}! Faltan 30 días para {destino}. Hoy vence el plazo del saldo: sin el pago se pierden las reservas. ¿Lo coordinamos?',
+  },
+  // borrador con lo que dijo Sol (24/11): que lo lea ella antes de que salga en las propuestas
+  bases: 'Para reservar se abona una seña del 50% del total. El saldo se completa hasta 30 días antes de la salida; sin ese pago se pierden las reservas. Los aéreos son intransferibles y, una vez emitidos, no tienen devolución. Los hoteles se reservan con tarifa cancelable según las condiciones de cada uno. Las tarifas están sujetas a disponibilidad hasta el momento de la reserva y valen hasta la fecha indicada en la propuesta.',
 };
+const ETIQUETAS_MENSAJES = { presupuesto_bajo: 'Presupuesto bajo (semáforo rojo)', sena: 'La seña no llega (a los 3 días)', comprobante: 'Pedir el comprobante', saldo_60: 'Saldo: 2 meses antes', saldo_30: 'Saldo: 1 mes antes' };
+const completar = (t, v) => String(t || '').replace(/\{(\w+)\}/g, (m, k) => v[k] ?? m);
+const primerNombre = n => String(n || '').replace(/^@/, '').split(' ')[0];
 
 async function leer(clave) {
   const r = await one('select valor from ajustes where clave=$1', ['reglas_' + clave]);
@@ -31,6 +44,21 @@ async function leer(clave) {
 }
 const guardar = (clave, valor) => q('insert into ajustes(clave,valor) values($1,$2) on conflict (clave) do update set valor=excluded.valor', ['reglas_' + clave, JSON.stringify(valor)]);
 const todas = async () => ({ preguntas: await leer('preguntas'), minimos: await leer('minimos'), cortes: await leer('cortes') });
+const mensajes = async () => ({ ...DEFAULTS.mensajes, ...(await leer('mensajes')) });
+// si las preguntas ya se habían editado, se suman una sola vez las dos nuevas de la weekly del 24/11
+async function migrar() {
+  if (await one("select 1 from ajustes where clave='migracion_preguntas_2411'")) return;
+  const r = await one("select valor from ajustes where clave='reglas_preguntas'");
+  if (r) {
+    const p = JSON.parse(r.valor), nuevas = DEFAULTS.preguntas['Viaje a medida'].slice(-2);
+    if (p['Viaje a medida']) for (const x of nuevas) if (!p['Viaje a medida'].includes(x)) p['Viaje a medida'].push(x);
+    await guardar('preguntas', p);
+  }
+  await q("insert into ajustes(clave,valor) values('migracion_preguntas_2411', now()::text)");
+}
+// destinos de Argentina: el cotizador arranca en pesos
+const ARGENTINA = /(argentin|bariloche|mendoza|salta|jujuy|ushuaia|calafate|chalten|iguaz|cordoba|mar del plata|puerto madryn|tucuman|catamarca|san juan|san luis|neuquen|patagonia|norte argentino|cataratas|villa la angostura|san martin de los andes|esteros del ibera|tierra del fuego|cafayate|purmamarca)/;
+const esArgentina = nombre => ARGENTINA.test(norm(nombre));
 
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 function minimoPara(nombre, minimos) {
@@ -59,7 +87,7 @@ function evaluar(d, ctx, reglas) {
   if (!d.presupuesto_usd) { nivel = Math.min(nivel, 1); motivos.push('No dijo presupuesto: mandarle salidas armadas para que se ubique.'); }
   else if (m && dias) {
     const alta = temporadaAlta(d.fechas, d.nombre, cortes);
-    const minimo = Math.round((Number(m[2]) + dias * Number(m[3])) * (alta ? 1 + cortes.alta / 100 : 1));
+    const minimo = minimoUSD(d, reglas);
     const pct = Math.round(Number(d.presupuesto_usd) / minimo * 100);
     const txt = `Pide USD ${Number(d.presupuesto_usd).toLocaleString('es-AR')} por persona; el mínimo para ${m[0]} ${dias} días${alta ? ' en temporada alta' : ''} es USD ${minimo.toLocaleString('es-AR')} (${pct}%).`;
     if (pct >= cortes.verde) motivos.push(txt + ' Alcanza.');
@@ -75,4 +103,12 @@ function evaluar(d, ctx, reglas) {
   return { semaforo: NIVEL[nivel], motivo: motivos.join(' ') };
 }
 
-module.exports = { DEFAULTS, leer, guardar, todas, evaluar, minimoPara };
+// mínimo por persona en USD para un destino (null si no hay mínimo cargado o faltan los días)
+function minimoUSD(d, { minimos, cortes }) {
+  const m = minimoPara(d.nombre, minimos), dias = Number(d.dias) || 0;
+  if (!m || !dias) return null;
+  const alta = temporadaAlta(d.fechas, d.nombre, cortes);
+  return Math.round((Number(m[2]) + dias * Number(m[3])) * (alta ? 1 + cortes.alta / 100 : 1));
+}
+
+module.exports = { DEFAULTS, ETIQUETAS_MENSAJES, leer, guardar, todas, mensajes, migrar, completar, primerNombre, evaluar, minimoPara, minimoUSD, esArgentina };

@@ -5,7 +5,7 @@ Las tablas se crean solas al arrancar. `npm start`.
 
 ## Instagram
 
-Los DM de la cuenta entran solos como leads. Variables: `IG_ACCESS_TOKEN` (token de larga duración de la cuenta; después se renueva solo), `IG_APP_SECRET` (secreto de la app de Instagram en Meta), `IG_VERIFY_TOKEN` (clave inventada, la misma que se carga en el webhook de Meta).
+Los DM de la cuenta entran solos a Leads → Conversaciones abiertas; el lead lo crea el equipo desde la conversación. Variables: `IG_ACCESS_TOKEN` (token de larga duración de la cuenta; después se renueva solo), `IG_APP_SECRET` (secreto de la app de Instagram en Meta), `IG_VERIFY_TOKEN` (clave inventada, la misma que se carga en el webhook de Meta).
 Webhook: `https://<dominio>/webhooks/instagram`, campo `messages`. Estado de la conexión en `/instagram`. Política de privacidad pública en `/privacidad`.
 
 ## Preguntas, semáforo y cotizador (17/11)
@@ -16,3 +16,15 @@ Webhook: `https://<dominio>/webhooks/instagram`, campo `messages`. Estado de la 
 - **Recordatorio:** a las 20 h del último mensaje del cliente sin respuesta, una sola vez. **Seguimiento** de la cotización a los 3 y 7 días.
 - **Cotizador** por destino (`/destino/:id/cotizar`): ítems con costo y margen, banco de cotizaciones parecidas, versiones (v1, v2…) y propuesta pública en `/c/:token` (se descarga como PDF desde el navegador).
 - Instagram solo deja mandar desde el CRM dentro de las 24 h del último mensaje del cliente; fuera de esa ventana el CRM ofrece copiar el texto.
+
+## Conversaciones y weekly con Sol (24/11)
+
+- **Conversaciones abiertas** (pestaña de Leads): una por persona y canal. Estado solo según quién mandó el último mensaje (Nueva / Te toca / Esperando al cliente). Se cierra como Terminada, Perdida o No es consulta (con Deshacer); si la persona vuelve a escribir, se reabre. Desde ahí se contesta Instagram (24 h) y se crea el lead. Lead de **visita a la oficina** con quién la atendió.
+- **Recotizar:** "Dijo que sí, pero cambió el precio" arma una versión nueva sin fecha de validez.
+- **Preguntas de la IA:** ocasión especial y categoría (campos en la ficha).
+- **Semáforo rojo:** botón "Armar la respuesta estándar" (mínimo calculado).
+- **Cotizador:** ítems Incluido / Opcional / Alternativa (interna), validez 24/48/72 h (3 días por defecto), pesos o dólares (Argentina arranca en pesos), seña 50%. La propuesta muestra opcionales y bases y condiciones.
+- **Seña que no llega** (`src/despues.js`): 3 días después de los datos, un mensaje; 3 días más sin respuesta, Perdido.
+- **Comprobante:** transferencia o depósito quedan con "Falta comprobante", aviso y mensaje.
+- **Saldo:** aviso y mensaje 2 meses y 1 mes antes de la salida (hace falta la fecha "Sale").
+- **Ajustes:** mensajes armados y bases y condiciones editables.

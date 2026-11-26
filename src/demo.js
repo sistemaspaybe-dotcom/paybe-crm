@@ -20,6 +20,13 @@ async function caso(p, datos) {
 }
 async function chat(p, c, mensajes) { // [[horasAtrás, 'c'|'p', texto]]
   for (const [h, quien, texto] of mensajes) await q(`insert into mensajes(persona_id,caso_id,mid,entrante,texto,creado) values($1,$2,$3,$4,$5,$6)`, [p.id, c.id, 'demo-' + Date.now() + '-' + (++n), quien === 'c', texto, hace(h)]);
+  for (const [h, quien] of mensajes) await require('./conversaciones').tocar(p.id, 'instagram', quien === 'c', hace(h));
+}
+async function sueltos(p, mensajes) { // conversación que todavía no es lead
+  for (const [h, quien, texto] of mensajes) {
+    await q(`insert into mensajes(persona_id,mid,entrante,texto,creado) values($1,$2,$3,$4,$5)`, [p.id, 'demo-' + Date.now() + '-' + (++n), quien === 'c', texto, hace(h)]);
+    await require('./conversaciones').tocar(p.id, 'instagram', quien === 'c', hace(h));
+  }
 }
 async function destino(c, d) {
   return one(`insert into destinos(caso_id,nombre,fechas,dias,detalle,presupuesto_usd,preferencia,estado) values($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
@@ -112,6 +119,10 @@ async function cargar() {
   await q(`insert into avisos(caso_id,para,texto) values($1,current_date,'Dijo que sí: mandarle los datos para la seña')`, [cs.id]);
   await actividad(cs, [['Sol', 'Cotización de Tailandia v1 mandada. Pasa a Esperando respuesta.'], ['Sol', 'Dijo que sí a Tailandia (v1). Lead Convertido: pasa a Oportunidad.']]);
 
+  // 9 · Conversaciones que todavía no son lead: una consulta nueva y una respuesta a un reel
+  await sueltos(await persona('Roberto S.', 'robertos'), [[0.2, 'c', 'Buenas! Tienen cruceros por el Caribe para febrero?']]);
+  await sueltos(await persona('Vane L.', 'vane.lucero'), [[1.5, 'c', '(respondió a una historia) [reel] jajaja me encanta 😍']]);
+
   // semáforo calculado con las reglas de Ajustes, igual que en una consulta real
   for (const c of [cc, cl, cu]) {
     await ia.ponerSemaforo(c.id);
@@ -131,6 +142,7 @@ async function responder(casoId) {
   const texto = esJavier ? 'Perdón la demora! Seríamos 2 o 3, capaz el año que viene, Italia y España. Presupuesto no sé, estoy viendo precios en varios lados. Desde Buenos Aires'
     : 'Somos 2, la segunda quincena de octubre, unos 14 días. Unos 5 mil dólares cada uno, salimos de Buenos Aires. Queremos confirmar en diciembre';
   await q(`insert into mensajes(persona_id,caso_id,mid,entrante,texto) values($1,$2,$3,true,$4)`, [c.persona_id, c.id, 'demo-' + Date.now(), texto]);
+  await require('./conversaciones').tocar(c.persona_id, 'instagram', true, new Date());
   const d = await one('select * from destinos where caso_id=$1 order by id limit 1', [c.id]);
   if (esJavier) {
     await q(`update casos set cuantos='2 o 3', salida='Buenos Aires', presupuesto='No sabe', confirma=null, senales=null, borrador=null, borrador_tipo=null, etapa='aguardando' where id=$1`, [c.id]);

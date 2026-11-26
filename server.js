@@ -2,10 +2,13 @@ const express = require('express');
 const cookieSession = require('cookie-session');
 const db = require('./src/db');
 const { q, one } = db;
-const { FASES, ACCIONES, BAJAS, MOTIVOS, accionesPara } = require('./src/flow');
+const { FASES, ACCIONES, BAJAS, MOTIVOS, PIDE_COMPROBANTE, MEDIOS, accionesPara } = require('./src/flow');
+const reglas = require('./src/reglas');
+const despues = require('./src/despues');
 const ia = require('./src/ia');
-const { esc, fecha, usd, layout, chipFase } = require('./src/views');
+const { esc, fecha, usd, dinero, layout, chipFase } = require('./src/views');
 const ig = require('./src/instagram');
+const conv = require('./src/conversaciones');
 
 const app = express();
 const EQUIPO = ['Patricia', 'Sol', 'Betina'];
@@ -46,8 +49,11 @@ async function lista(req, res, fase, titulo, ruta) {
   const rows = await q(`select c.*, p.nombre, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id where c.fase=$1 order by c.actualizado desc`, [fase]);
   const orden = Object.keys(FASES[fase].etapas);
   const porEtapa = orden.map(e => `<span class="chip">${FASES[fase].etapas[e]} · ${rows.filter(r => r.etapa === e).length}</span>`).join(' ');
-  page(req, res, titulo, `<h1>${titulo} · ${rows.length}</h1><p>${porEtapa}</p><div class="card"><table><tr><th>Persona</th><th>Etapa</th><th>Servicio</th><th>Viaje</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
+  const tabs = fase === 'lead' ? `<div class="row" style="justify-content:space-between"><h1>Leads</h1><div class="row"><a class="btn" href="/nuevo?oficina=1">+ Visita a la oficina</a><a class="btn p" href="/nuevo">+ Agregar lead</a></div></div>
+  <div class="row" style="margin:12px 0;gap:0;border-bottom:1px solid var(--linea)"><a href="/leads" style="padding:10px 14px;font-weight:700;color:#5A6670">Conversaciones abiertas · ${(await conv.abiertas()).length}</a><a href="/leads?tab=leads" style="padding:10px 14px;font-weight:700;border-bottom:3px solid var(--coral);color:var(--marino)">Leads · ${rows.length}</a></div>` : `<h1>${titulo} · ${rows.length}</h1>`;
+  page(req, res, titulo, `${tabs}<p>${porEtapa}</p><div class="card"><table><tr><th>Persona</th><th>Etapa</th><th>Servicio</th><th>Viaje</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
 }
+conv.rutas(app, { wrap, page, log, hace, ig, ia });
 app.get('/leads', wrap((req, res) => lista(req, res, 'lead', 'Leads', '/leads')));
 app.get('/oportunidades', wrap((req, res) => lista(req, res, 'oportunidad', 'Oportunidades', '/oportunidades')));
 app.get('/ventas', wrap((req, res) => lista(req, res, 'venta', 'Ventas', '/ventas')));
@@ -57,17 +63,20 @@ app.get('/', wrap(async (req, res) => {
   const avisos = await q(`select a.*, p.nombre, c.id caso from avisos a join casos c on c.id=a.caso_id join personas p on p.id=c.persona_id where not a.hecho order by a.para limit 20`);
   const hoy = new Date().toISOString().slice(0, 10);
   const nuevos = await q(`select c.*, p.nombre, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id where (c.fase='lead' and (c.etapa in ('para_cotizar','cotizando') or c.borrador is not null)) or (c.fase='oportunidad' and c.etapa='le_intereso') order by c.actualizado limit 20`);
-  const sinContestar = await q(`select c.id, p.nombre, m.texto, m.creado from casos c join personas p on p.id=c.persona_id
-    join lateral (select * from mensajes where caso_id=c.id order by creado desc limit 1) m on true where m.entrante and c.fase<>'baja' order by m.creado limit 20`);
+  const sinContestar = (await conv.sinContestar()).slice(0, 20);
   page(req, res, 'Inicio', `<h1>Lo de hoy</h1>
-  ${sinContestar.length ? `<h2 style="margin:16px 0 8px">Sin contestar en Instagram · ${sinContestar.length}</h2>${sinContestar.map(m => `<a class="aviso rojo" href="/caso/${m.id}" style="color:inherit"><span><b>${esc(m.nombre)}</b> · ${esc((m.texto || '').slice(0, 90))}</span><span class="mut">${hace(m.creado)}</span></a>`).join('')}` : ''}
+  ${sinContestar.length ? `<h2 style="margin:16px 0 8px">Sin contestar · ${sinContestar.length}</h2>${sinContestar.map(m => `<a class="aviso rojo" href="/leads?c=${m.id}" style="color:inherit"><span>${conv.icono(m.canal)} <b>${esc(m.nombre)}</b> · ${esc((m.ult_texto || '').slice(0, 90))}</span><span class="mut">${hace(m.ult_en)}</span></a>`).join('')}` : ''}
   <h2 style="margin:16px 0 8px">Avisos</h2>${avisos.map(a => `<div class="aviso ${String(a.para.toISOString?.().slice(0, 10) || a.para) < hoy ? 'rojo' : ''}"><span><b>${esc(a.nombre)}</b> · ${esc(a.texto)} <span class="mut">(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('') || '<p class=mut>No hay avisos pendientes.</p>'}
   <h2 style="margin:16px 0 8px">Para hacer: mensajes para mandar, para cotizar y cotizando</h2><div class="card"><table>${nuevos.map(filaCaso).join('') || '<tr><td class=mut>Nada pendiente.</td></tr>'}</table></div>`, '/');
 }));
 app.post('/aviso/:id/hecho', wrap(async (req, res) => { await q('update avisos set hecho=true where id=$1', [req.params.id]); res.redirect(req.get('referer') || '/'); }));
 
 // ---- alta de lead ----
-app.get('/nuevo', (req, res) => page(req, res, 'Agregar lead', `<h1>Agregar lead</h1><form class="card" method=post action=/nuevo><div class="f">
+app.get('/nuevo', (req, res) => req.query.oficina ? page(req, res, 'Visita a la oficina', `<h1>Visita a la oficina</h1><p class=mut>Alguien vino a la agencia a consultar.</p><form class="card" method=post action=/nuevo><input type=hidden name=origen value="Oficina"><div class="f">
+<div><label>Nombre</label><input name=nombre required></div><div><label>WhatsApp</label><input name=whatsapp inputmode=tel></div>
+<div style="grid-column:1/-1"><label>Qué busca</label><input name=destino placeholder="Ej. crucero por el Caribe en febrero"></div>
+<div><label>Quién la atendió</label><select name=atendio>${EQUIPO.map(n => `<option${n === req.session.quien ? ' selected' : ''}>${n}</option>`).join('')}</select></div></div>
+<p><button class="p">Crear lead</button></p></form>`, '/leads') : page(req, res, 'Agregar lead', `<h1>Agregar lead</h1><form class="card" method=post action=/nuevo><div class="f">
 <div><label>Nombre</label><input name=nombre required></div><div><label>WhatsApp</label><input name=whatsapp></div><div><label>Mail</label><input name=mail></div>
 <div><label>De dónde vino</label><select name=origen>${['Instagram', 'WhatsApp', 'Mail', 'Recomendado', 'Oficina o teléfono', 'Cliente que vuelve'].map(o => `<option>${o}</option>`).join('')}</select></div>
 <div><label>Qué pide</label><select name=servicio>${['', 'Aéreo', 'Hotel', 'Paquete', 'Visa', 'Grupal', 'Crucero'].map(o => `<option>${o}</option>`).join('')}</select></div>
@@ -77,8 +86,9 @@ app.post('/nuevo', wrap(async (req, res) => {
   const b = req.body;
   let p = b.whatsapp && await one('select id from personas where whatsapp=$1', [b.whatsapp]);
   if (!p) p = await one('insert into personas(nombre,whatsapp,mail,origen) values($1,$2,$3,$4) returning id', [b.nombre, b.whatsapp, b.mail, b.origen]);
-  const c = await one('insert into casos(persona_id,destino,servicio,fechas,cuantos,presupuesto) values($1,$2,$3,$4,$5,$6) returning id', [p.id, b.destino, b.servicio, b.fechas, b.cuantos, b.presupuesto]);
-  await log(c.id, req.session.quien, `Lead creado (${b.origen}).`);
+  const c = await one('insert into casos(persona_id,destino,servicio,fechas,cuantos,presupuesto,atendio) values($1,$2,$3,$4,$5,$6,$7) returning id', [p.id, b.destino, b.servicio || null, b.fechas, b.cuantos, b.presupuesto, EQUIPO.includes(b.atendio) ? b.atendio : null]);
+  if (b.origen === 'Oficina' && b.destino) await q('insert into destinos(caso_id,nombre) values($1,$2)', [c.id, b.destino]);
+  await log(c.id, req.session.quien, b.origen === 'Oficina' ? `Lead creado: visita a la oficina${EQUIPO.includes(b.atendio) ? ', la atendió ' + b.atendio : ''}.` : `Lead creado (${b.origen}).`);
   res.redirect('/caso/' + c.id);
 }));
 
@@ -106,7 +116,18 @@ app.post('/caso/:id/:accion', wrap(async (req, res, next) => {
   if (!c || `${c.fase}.${c.etapa}` !== a.desde) return res.redirect('/caso/' + req.params.id);
   await q('update casos set fase=$1, etapa=$2, actualizado=now() where id=$3', [...a.a, c.id]);
   await log(c.id, req.session.quien, a.log);
-  if (a.pago) await q('insert into pagos(caso_id,que,monto,medio) values($1,$2,$3,$4)', [c.id, a.pago, req.body.monto || null, req.body.medio]);
+  if (req.params.accion === 'datos_sena') await q('update casos set datos_sena_en=now(), sena_seguimiento_en=null where id=$1', [c.id]);
+  if (a.pago) {
+    const medio = MEDIOS.includes(req.body.medio) ? req.body.medio : MEDIOS[0], pide = PIDE_COMPROBANTE.includes(medio);
+    const monto = Number(String(req.body.monto || '').replace(/\./g, '').replace(',', '.')) || null;
+    await q('insert into pagos(caso_id,que,monto,medio,moneda,comprobante) values($1,$2,$3,$4,$5,$6)', [c.id, a.pago, monto, medio, req.body.moneda === 'ARS' ? 'ARS' : 'USD', !pide]);
+    if (pide) { // falta el comprobante: aviso + mensaje armado para pedirlo
+      const p = await one('select nombre from personas where id=$1', [c.persona_id]);
+      const texto = reglas.completar((await reglas.mensajes()).comprobante, { nombre: reglas.primerNombre(p.nombre), medio: medio.toLowerCase(), destino: c.destino || 'el viaje' });
+      await q(`update casos set borrador=$1, borrador_tipo='comprobante', borrador_en=now() where id=$2`, [texto, c.id]);
+      await q(`insert into avisos(caso_id,para,texto) values($1,current_date,$2)`, [c.id, `Falta el comprobante (${a.pago.toLowerCase()} por ${medio.toLowerCase()})`]);
+    }
+  }
   if (a.aviso) await q(`insert into avisos(caso_id,para,texto) values($1,current_date + $2::int,$3)`, [c.id, a.aviso[0], a.aviso[1]]);
   res.redirect('/caso/' + c.id);
 }));
@@ -133,7 +154,7 @@ app.get('/cotizaciones', wrap(async (req, res) => {
   const rows = await q(`select k.*, p.nombre from cotizaciones k left join casos c on c.id=k.caso_id left join personas p on p.id=c.persona_id where k.viaje ilike $1 and k.estado<>'borrador' order by k.mandada desc nulls last, k.id desc`, [s]);
   page(req, res, 'Cotizaciones', `<div class="row" style="justify-content:space-between"><div><h1>Cotizaciones</h1><p class=mut>Todas las que se mandaron. Cuando otro cliente pide lo mismo destino, el cotizador te las ofrece como base.</p></div><a class="btn p" href="/cotizaciones/nueva">+ Registrar una cotización</a></div>
   <form class="row" style="margin:10px 0"><input name=q value="${esc(req.query.q || '')}" placeholder="Buscar por viaje" style="max-width:340px"><button>Buscar</button></form>
-  <div class="card"><table><tr><th>Viaje</th><th>Mandada</th><th>Cuántos</th><th>Precio pp</th><th>Margen</th><th>Resultado</th><th></th></tr>${rows.map(k => `<tr><td><b>${esc(k.viaje)}</b>${k.version > 1 ? ` <span class=mut>v${k.version}</span>` : ''}<div class=mut>${esc(k.nombre || '')} · ${esc(k.detalle)}</div></td><td>${fecha(k.mandada)}</td><td>${esc(k.cuantos)}</td><td>${usd(k.precio_pp)}</td><td>${k.margen != null ? k.margen + '%' : '—'}</td><td>${esc({ mandada: 'Mandada', aceptada: 'Aceptada ✓', reemplazada: 'Reemplazada', no_eligio: 'No eligió' }[k.estado] || k.resultado)}</td><td>${k.token ? `<a class="btn" target=_blank href="/c/${k.token}">Ver</a>` : `<a class="btn" href="/cotizaciones/nueva?base=${k.id}">Reutilizar</a>`}</td></tr>`).join('') || '<tr><td colspan=7 class=mut>Todavía no hay cotizaciones.</td></tr>'}</table></div>`, '/cotizaciones');
+  <div class="card"><table><tr><th>Viaje</th><th>Mandada</th><th>Cuántos</th><th>Precio pp</th><th>Margen</th><th>Resultado</th><th></th></tr>${rows.map(k => `<tr><td><b>${esc(k.viaje)}</b>${k.version > 1 ? ` <span class=mut>v${k.version}</span>` : ''}<div class=mut>${esc(k.nombre || '')} · ${esc(k.detalle)}</div></td><td>${fecha(k.mandada)}</td><td>${esc(k.cuantos)}</td><td>${dinero(k.precio_pp, k.moneda)}</td><td>${k.margen != null ? k.margen + '%' : '—'}</td><td>${esc({ mandada: 'Mandada', aceptada: 'Aceptada ✓', reemplazada: 'Reemplazada', no_eligio: 'No eligió' }[k.estado] || k.resultado)}</td><td>${k.token ? `<a class="btn" target=_blank href="/c/${k.token}">Ver</a>` : `<a class="btn" href="/cotizaciones/nueva?base=${k.id}">Reutilizar</a>`}</td></tr>`).join('') || '<tr><td colspan=7 class=mut>Todavía no hay cotizaciones.</td></tr>'}</table></div>`, '/cotizaciones');
 }));
 app.get('/cotizaciones/nueva', wrap(async (req, res) => {
   const b = req.query.base ? await one('select * from cotizaciones where id=$1', [req.query.base]) : {};
@@ -169,7 +190,7 @@ app.get('/dashboards', wrap(async (req, res) => {
 // ---- instagram: estado de la conexión ----
 app.get('/instagram', wrap(async (req, res) => {
   const e = await ig.estado(), si = v => v ? '✓' : 'Falta', cuando = d => d ? new Date(d).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }) : '—';
-  page(req, res, 'Instagram', `<h1>Instagram</h1><p class=mut>Los mensajes que llegan a la cuenta entran solos como leads.</p>
+  page(req, res, 'Instagram', `<h1>Instagram</h1><p class=mut>Los mensajes que llegan a la cuenta entran solos a Leads → Conversaciones abiertas. El lead lo crea el equipo desde la conversación.</p>
   <div class="card"><table><tr><td>Cuenta conectada</td><td>${e.cuenta ? '@' + esc(e.cuenta) : '—'}</td></tr><tr><td>Token (IG_ACCESS_TOKEN)</td><td>${si(e.token)}</td></tr><tr><td>Secreto de la app (IG_APP_SECRET)</td><td>${si(e.secreto)}</td></tr><tr><td>Clave de verificación (IG_VERIFY_TOKEN)</td><td>${si(e.verify)}</td></tr><tr><td>Lectura con IA para completar la ficha (ANTHROPIC_API_KEY)</td><td>${si(e.ia)}</td></tr>
   <tr><td>Toma mensajes desde</td><td>${cuando(e.desde)}</td></tr><tr><td>Mensajes guardados</td><td>${e.mensajes}</td></tr><tr><td>Último mensaje</td><td>${cuando(e.ultimoMensaje)}</td></tr><tr><td>Último aviso de Meta</td><td>${cuando(e.aviso)}</td></tr><tr><td>Última pasada</td><td>${cuando(e.sync)}</td></tr><tr><td>Token renovado</td><td>${cuando(e.tokenFecha)}</td></tr>
   ${e.error ? `<tr><td>Último error</td><td style="color:#B84A53">${esc(e.error)}</td></tr>` : ''}</table>
@@ -182,6 +203,6 @@ app.post('/instagram/sincronizar', wrap(async (req, res) => {
 
 app.use((e, req, res, next) => { console.error(e); res.status(500).send('Algo salió mal. Probá de nuevo.'); });
 const port = process.env.PORT || 3000;
-db.init().then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message));
-  const tarea = () => ia.revisarRecordatorios().then(ia.revisarSeguimientos).catch(e => console.error('Recordatorios:', e.message));
+db.init().then(reglas.migrar).then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message));
+  const tarea = () => ia.revisarRecordatorios().then(ia.revisarSeguimientos).then(despues.revisar).catch(e => console.error('Recordatorios:', e.message));
   setTimeout(tarea, 30e3); setInterval(tarea, 5 * 60e3).unref(); })).catch(e => { console.error(e); process.exit(1); });
