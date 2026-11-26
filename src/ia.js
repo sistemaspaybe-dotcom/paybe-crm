@@ -55,7 +55,7 @@ Sin estos datos no se puede cotizar, así que hay que conseguirlos sí o sí: ${
 
 Devolvé SOLO un JSON con esta forma (null cuando el cliente no lo dijo; no inventes):
 {"es_consulta": true si la persona pide información, precio o un viaje (aunque sea vago, como "hola, info"); false si NO es una consulta de un posible cliente: reacciones o comentarios a historias o reels, chistes, saludos entre conocidos, menciones, proveedores, otras agencias u operadores ofreciendo tarifas o servicios, spam,
- "tipo": uno de ${JSON.stringify(Object.keys(R.preguntas))},
+ "tipos": lista con todos los servicios que pide, de ${JSON.stringify(Object.keys(R.preguntas))} (puede ser más de uno, ej. ["Aéreo","Hotel"]),
  "caso": "uno" (un destino) | "combinado" (varios destinos en el mismo viaje) | "opciones" (está eligiendo entre destinos) | "distintos" (viajes distintos en fechas distintas),
  "cuantos": texto corto, "salida": ciudad de salida, "presupuesto": como lo dijo, "presupuesto_usd": número por persona en dólares o null, "confirma": cuándo quiere confirmar,
  "ocasion": si es por algo especial (cumpleaños, luna de miel, aniversario, viaje soñado), "categoria": qué categoría busca (aéreo económico o business, tipo de alojamiento), "whatsapp": teléfono, "mail": mail,
@@ -79,7 +79,8 @@ ${hilo}
   }
 
   // lo común, en la consulta
-  const tipo = Object.keys(R.preguntas).includes(d.tipo) ? d.tipo : null;
+  const tipos = (Array.isArray(d.tipos) ? d.tipos : [d.tipo]).filter(t => Object.keys(R.preguntas).includes(t));
+  const tipo = tipos.length ? [...new Set([...reglas.serviciosDe(c), ...tipos])].join(', ') : null;
   const comunes = { servicio: tipo, cuantos: txt(d.cuantos), salida: txt(d.salida), presupuesto: txt(d.presupuesto), confirma: txt(d.confirma), ocasion: txt(d.ocasion), categoria: txt(d.categoria), tipo_destinos: ['uno', 'combinado', 'opciones', 'distintos'].includes(d.caso) ? d.caso : null };
   const puestos = [];
   for (const [k, v] of Object.entries(comunes)) if (v && v !== c[k]) { await q(`update casos set ${k}=$1 where id=$2`, [v, c.id]); if (!c[k] && k !== 'tipo_destinos') puestos.push({ servicio: 'tipo', cuantos: 'cuántos', confirma: 'cuándo confirma', ocasion: 'ocasión especial', categoria: 'categoría' }[k] || k); c[k] = v; }
@@ -153,7 +154,7 @@ async function ponerSemaforo(casoId, R) {
   const ds = await q(`select * from destinos where caso_id=$1 and estado in ('pendiente','semaforo') order by id`, [casoId]);
   const recurrente = !!await one(`select 1 from casos where persona_id=$1 and id<>$2 and fase in ('oportunidad','venta')`, [c.persona_id, c.id]);
   const noContesto = !!c.recordatorio_en && !await one('select 1 from mensajes where caso_id=$1 and entrante and creado > $2', [c.id, c.recordatorio_en]) && (Date.now() - new Date(c.recordatorio_en)) > 24 * 3600e3;
-  const ctx = { sinSemaforo: ['Visa', 'Aéreo'].includes(c.servicio), soloPrecio: c.senales === 'solo_precio', confirmaVago: c.servicio === 'Viaje a medida' && (!c.confirma || /no se|no sé|ver|pensar/i.test(c.confirma)), recurrente, noContesto };
+  const ctx = { sinSemaforo: reglas.serviciosDe(c).length > 0 && reglas.serviciosDe(c).every(t => ['Visa', 'Aéreo'].includes(t)), soloPrecio: c.senales === 'solo_precio', confirmaVago: reglas.serviciosDe(c).includes('Viaje a medida') && (!c.confirma || /no se|no sé|ver|pensar/i.test(c.confirma)), recurrente, noContesto };
   for (const d of ds) {
     const r = reglas.evaluar(d, ctx, R);
     if (r.semaforo !== d.semaforo || r.motivo !== d.motivo) await q(`update destinos set semaforo=$1, motivo=$2, estado='semaforo' where id=$3`, [r.semaforo, r.motivo, d.id]);

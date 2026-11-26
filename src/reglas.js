@@ -121,8 +121,12 @@ const NECESARIOS = {
   'Visa': ['destino', 'cuantos'],
 };
 const NOMBRE_DATO = { tipo: 'tipo de consulta', destino: 'destino', fechas: 'fechas', dias: 'cuántos días', cuantos: 'cuántos viajan', presupuesto: 'presupuesto', salida: 'desde dónde salen', categoria: 'categoría' };
+// una consulta puede pedir varios servicios a la vez (se guardan separados por coma)
+const serviciosDe = c => String(c?.servicio || '').split(',').map(x => x.trim()).filter(Boolean);
+// lo necesario para cotizar es la suma de lo que pide cada servicio elegido
+const necesariosDe = c => { const sv = serviciosDe(c); return sv.length ? [...new Set(sv.flatMap(t => NECESARIOS[t] || NECESARIOS['Viaje a medida']))] : NECESARIOS['Viaje a medida']; };
 function faltanParaCotizar(c, destinos) {
-  const pide = NECESARIOS[c.servicio] || NECESARIOS['Viaje a medida']; // sin tipo, se pide lo de un viaje a medida
+  const pide = necesariosDe(c); // sin tipo, se pide lo de un viaje a medida
   const ds = (destinos || []).filter(d => !['descartado', 'no_eligio'].includes(d.estado));
   const vacio = v => v == null || String(v).trim() === '';
   return pide.filter(k => k === 'destino' ? !ds.length
@@ -132,4 +136,4 @@ function faltanParaCotizar(c, destinos) {
     : vacio(c[k])).concat(c.servicio ? [] : ['tipo']);
 }
 
-module.exports = { NECESARIOS, NOMBRE_DATO, faltanParaCotizar, DEFAULTS, ETIQUETAS_MENSAJES, leer, guardar, todas, mensajes, migrar, completar, primerNombre, evaluar, minimoPara, minimoUSD, esArgentina };
+module.exports = { serviciosDe, necesariosDe, NECESARIOS, NOMBRE_DATO, faltanParaCotizar, DEFAULTS, ETIQUETAS_MENSAJES, leer, guardar, todas, mensajes, migrar, completar, primerNombre, evaluar, minimoPara, minimoUSD, esArgentina };

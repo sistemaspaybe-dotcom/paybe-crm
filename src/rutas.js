@@ -94,15 +94,15 @@ module.exports = function (app, { wrap, page, log, hace }) {
     };
     // lo que falta para poder cotizar (fechas y días van en cada destino)
     const faltan = c.fase === 'lead' ? reglas.faltanParaCotizar(c, ds) : [];
-    const pide = c.fase === 'lead' ? (reglas.NECESARIOS[c.servicio] || reglas.NECESARIOS['Viaje a medida']).concat('tipo') : [];
+    const pide = c.fase === 'lead' ? reglas.necesariosDe(c).concat('tipo') : [];
     const marca = k => faltan.includes(k) ? ' class=falta' : '';
     const ast = k => pide.includes(k) ? ' *' : '';
     const faltaHtml = c.fase !== 'lead' ? '' : faltan.length
-      ? `<style>.falta input,.falta select{border-color:#D8626B;background:#FFF1F1}</style><div class="aviso rojo" style="margin:8px 0;display:block">Para cotizar falta: <b>${faltan.map(k => reglas.NOMBRE_DATO[k]).join(', ')}</b>.${faltan.some(k => ['destino', 'fechas', 'dias'].includes(k)) ? ' Destino, fechas y días se cargan en cada destino, arriba.' : ''} Hasta que esté todo no pasa a Para cotizar.</div>`
+      ? `<style>.falta>input,.falta>select,input.req{border-color:#D8626B;background:#FFF1F1}</style><div class="aviso rojo" style="margin:8px 0;display:block">Para cotizar falta: <b>${faltan.map(k => reglas.NOMBRE_DATO[k]).join(', ')}</b>.${faltan.some(k => ['destino', 'fechas', 'dias'].includes(k)) ? ' Los destinos van acá abajo, cada uno con sus fechas y días.' : ''} Hasta que esté todo no pasa a Para cotizar.</div>`
       : '<div class="aviso" style="margin:8px 0;display:block">✓ Está todo lo necesario para cotizar.</div>';
     const destinosHtml = `<div class="row" style="justify-content:space-between;margin:18px 0 8px"><h2>Destinos de esta consulta</h2>${c.tipo_destinos && ds.length > 1 ? `<span class=mut>${esc({ combinado: 'Un viaje que combina destinos', opciones: 'Está eligiendo entre destinos', distintos: 'Son viajes distintos', uno: '' }[c.tipo_destinos] || '')}</span>` : ''}</div>
       <div class="grid">${ds.map(tarjeta).join('') || '<div class="card mut">Todavía no hay destinos. La IA los crea al leer el chat, o agregalo abajo.</div>'}</div>
-      ${c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/destino class="row" style="margin-top:8px"><input name=nombre placeholder="Agregar un destino a esta consulta (ej. Vietnam)" style="max-width:360px" required><button>+ Agregar destino</button></form>` : ''}`;
+`;
 
     // chat (Instagram y WhatsApp juntos)
     const igBtn = c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : '';
@@ -134,7 +134,10 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ${destinosHtml}
     ${hilo}
     <div class="grid"><div class="card" id=datos><h2>Lo que vale para toda la consulta</h2>${faltaHtml}<form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
-    <div${marca('tipo')}><label>Tipo de consulta${ast('tipo')}</label><select name=servicio>${['', ...Object.keys(reglas.DEFAULTS.preguntas)].map(o => `<option ${o === c.servicio ? 'selected' : ''}>${o}</option>`).join('')}${c.servicio && !Object.keys(reglas.DEFAULTS.preguntas).includes(c.servicio) ? `<option selected>${esc(c.servicio)}</option>` : ''}</select></div>
+    <div${marca('tipo')} style="grid-column:1/-1"><label>Tipo de consulta${ast('tipo')} <span class=mut>(se pueden elegir varios)</span></label><div class=row style="gap:6px 14px;flex-wrap:wrap;padding:6px 0">${[...new Set([...Object.keys(reglas.DEFAULTS.preguntas), ...reglas.serviciosDe(c)])].map(o => `<label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:500;color:var(--marino)"><input type=checkbox name=servicio value="${esc(o)}" style="width:auto"${reglas.serviciosDe(c).includes(o) ? ' checked' : ''}> ${esc(o)}</label>`).join('')}</div></div>
+    ${c.fase === 'lead' ? `<div style="grid-column:1/-1"${marca('destino') || marca('fechas') || marca('dias')}><label>Destinos${ast('destino')} <span class=mut>(uno o varios; fechas y días de cada uno)</span></label>
+      <table style="margin-top:4px"><tr><th>Destino</th><th>Fechas</th><th style="width:90px">Días</th></tr>${ds.filter(d => !['descartado', 'no_eligio'].includes(d.estado)).map(d => `<tr><td><input name="dn_${d.id}" value="${esc(d.nombre)}"></td><td><input name="df_${d.id}" value="${esc(d.fechas || '')}" placeholder="Ej. marzo 2027" class="${faltan.includes('fechas') && !d.fechas ? 'req' : ''}"></td><td><input name="dd_${d.id}" value="${d.dias ?? ''}" inputmode=numeric class="${faltan.includes('dias') && !Number(d.dias) ? 'req' : ''}"></td></tr>`).join('')}
+      <tr><td><input name=nuevo_nombre placeholder="${ds.length ? '+ Otro destino' : 'Ej. Brasil'}" class="${faltan.includes('destino') ? 'req' : ''}"></td><td><input name=nuevo_fechas placeholder="Fechas"></td><td><input name=nuevo_dias placeholder="Días" inputmode=numeric></td></tr></table></div>` : ''}
     <div${marca('cuantos')}><label>Cuántos viajan${ast('cuantos')}</label><input name=cuantos value="${esc(c.cuantos)}"></div><div${marca('salida')}><label>Desde dónde salen${ast('salida')}</label><input name=salida value="${esc(c.salida)}"></div>
     <div${marca('presupuesto')}><label>Presupuesto${ast('presupuesto')}</label><input name=presupuesto value="${esc(c.presupuesto)}"></div><div><label>Cuándo confirma <span class=mut>(opcional)</span></label><input name=confirma value="${esc(c.confirma)}"></div><div><label>Ocasión especial <span class=mut>(opcional)</span></label><input name=ocasion value="${esc(c.ocasion)}" placeholder="Cumpleaños, luna de miel…"></div><div${marca('categoria')}><label>Categoría${ast('categoria')}</label><input name=categoria value="${esc(c.categoria)}" placeholder="Económico o business, tipo de hotel"></div>${c.atendio ? `<div><label>Atendió en la oficina</label><input value="${esc(c.atendio)}" disabled></div>` : ''}${c.fase === 'lead' ? `<input type=hidden name=total value="${c.total ?? ''}"><input type=hidden name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"><input type=hidden name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}">` : `<div><label>Total venta USD</label><input name=total value="${c.total ?? ''}"></div>
     <div><label>Sale</label><input type=date name=sale value="${c.sale ? new Date(c.sale).toISOString().slice(0, 10) : ''}"></div><div><label>Vuelve</label><input type=date name=vuelve value="${c.vuelve ? new Date(c.vuelve).toISOString().slice(0, 10) : ''}"></div>`}
@@ -149,9 +152,20 @@ module.exports = function (app, { wrap, page, log, hace }) {
 
   app.post('/caso/:id/datos', wrap(async (req, res) => {
     const b = req.body;
+    b.servicio = [].concat(b.servicio || []).filter(Boolean).join(', ');
+    // destinos cargados en la misma tarjeta
+    const c0 = await one('select * from casos where id=$1', [req.params.id]);
+    for (const d of await q(`select * from destinos where caso_id=$1 and estado not in ('descartado','no_eligio')`, [req.params.id])) {
+      if (b['dn_' + d.id] === undefined) continue;
+      const nombre = String(b['dn_' + d.id]).trim() || d.nombre, fechas = n2(b['df_' + d.id]), dias = Number(b['dd_' + d.id]) || null;
+      if (nombre !== d.nombre || (fechas || null) !== (d.fechas || null) || dias !== (d.dias || null)) await q('update destinos set nombre=$1, fechas=$2, dias=$3 where id=$4', [nombre, fechas, dias, d.id]);
+    }
+    const nuevo = String(b.nuevo_nombre || '').trim();
+    if (nuevo) { await q('insert into destinos(caso_id,nombre,fechas,dias) values($1,$2,$3,$4)', [req.params.id, nuevo, n2(b.nuevo_fechas), Number(b.nuevo_dias) || null]); await log(req.params.id, req.session.quien, 'Destino agregado: ' + nuevo + '.'); }
+    if (nuevo || !c0.destino) { const ns = await q(`select nombre from destinos where caso_id=$1 and estado not in ('descartado','no_eligio') order by id`, [req.params.id]); if (ns.length) await q('update casos set destino=$1 where id=$2', [ns.map(x => x.nombre).join(' / '), req.params.id]); }
     await q('update casos set servicio=$1,cuantos=$2,salida=$3,presupuesto=$4,confirma=$5,total=$6,sale=$7,vuelve=$8,ocasion=$9,categoria=$10,actualizado=now() where id=$11', [n2(b.servicio), n2(b.cuantos), n2(b.salida), n2(b.presupuesto), n2(b.confirma), n2(b.total), n2(b.sale), n2(b.vuelve), n2(b.ocasion), n2(b.categoria), req.params.id]);
     await ia.ponerSemaforo(req.params.id).catch(() => {});
-    res.redirect('/caso/' + req.params.id);
+    res.redirect('/caso/' + req.params.id + '#datos');
   }));
 
   // ---------- mandar el borrador ----------
