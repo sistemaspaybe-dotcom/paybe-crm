@@ -206,4 +206,19 @@ async function migrar() {
   await q(`insert into destinos(caso_id,nombre,fechas,presupuesto,estado) select id, destino, fechas, presupuesto, case when fase='lead' then 'pendiente' else 'eligio' end from casos c where destino is not null and destino<>'' and not exists (select 1 from destinos d where d.caso_id=c.id)`);
   await q("insert into ajustes(clave,valor) values('migracion_etapas_v4', now()::text)");
 }
-module.exports = { pool, q, one, contexto, init: () => pool.query(SCHEMA).then(() => pool.query(REGISTRO)).then(migrar) };
+async function limpiezas() {
+  // 27/11, una sola vez: borrar las pruebas que pidió Sofi (demo 🧪 y sus chats de prueba en Instagram y WhatsApp).
+  // Solo si el caso es de una persona con ese nombre, para no tocar nada más.
+  if (!await one("select 1 from ajustes where clave='limpieza_pruebas_2711'")) {
+    await q(`delete from cotizaciones where caso_id in (select c.id from casos c join personas p on p.id=c.persona_id where p.origen='Demo')`);
+    await q(`delete from personas where origen='Demo'`);
+    const ps = await q(`select distinct p.id from casos c join personas p on p.id=c.persona_id where c.id in (1,20,22,34) and p.nombre in ('Sofia','Sopia') and c.fase='lead'`);
+    for (const { id } of ps) {
+      await q(`delete from cotizaciones where caso_id in (select id from casos where persona_id=$1)`, [id]);
+      await q('delete from mensajes where persona_id=$1', [id]);
+      await q('delete from personas where id=$1', [id]);
+    }
+    await q("insert into ajustes(clave,valor) values('limpieza_pruebas_2711', $1)", [String(ps.length)]);
+  }
+}
+module.exports = { pool, q, one, contexto, init: () => pool.query(SCHEMA).then(() => pool.query(REGISTRO)).then(migrar).then(limpiezas) };
