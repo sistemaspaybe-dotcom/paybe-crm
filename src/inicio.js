@@ -1,7 +1,7 @@
 // Inicio: qué hay que hacer hoy, en tres columnas (Contestar, Cotizar, Cobrar y seguir), con el botón de cada cosa a mano.
 const { q, one } = require('./db');
 const { FASES } = require('./flow');
-const { esc, fecha, usd } = require('./views');
+const { esc, fecha, usd, dinero } = require('./views');
 const conv = require('./conversaciones');
 
 const CSS = `<style>
@@ -73,7 +73,7 @@ module.exports = (app, { wrap, page }) => {
   app.get('/', wrap(async (req, res) => {
     const hoy = hoyAR();
     const DESTS = `(select json_agg(json_build_object('id',d.id,'nombre',d.nombre,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests`;
-    const [chats, cotizar, cobrar, avisos, etapas, salidas] = await Promise.all([
+    const [chats, cotizar, cobrar, avisos, etapas, salidas, vencen] = await Promise.all([
       conv.sinContestar(),
       q(`select c.*, p.nombre, ${DESTS} from casos c join personas p on p.id=c.persona_id
          where c.fase='lead' and (c.etapa in ('para_cotizar','cotizando','recotizar') or c.borrador is not null)
@@ -90,6 +90,12 @@ module.exports = (app, { wrap, page }) => {
       q(`select fase, etapa, count(*)::int n, coalesce(sum(total),0)::float total from casos where fase<>'baja' group by 1,2`),
       q(`select c.id, c.sale, c.destino, c.cuantos, p.nombre, ${DESTS} from casos c join personas p on p.id=c.persona_id
          where c.fase='venta' and c.sale between current_date and current_date + 30 order by c.sale limit 8`),
+      // cotizaciones mandadas que vencen en los próximos 3 días (o vencieron hace poco) y el cliente no decidió
+      q(`select k.id, k.version, k.precio_pp, k.moneda, k.valida_hasta, k.aviso_vence_en, k.mandada_por, d.nombre destino, c.id caso, c.etapa, p.nombre
+         from cotizaciones k join casos c on c.id=k.caso_id join personas p on p.id=c.persona_id left join destinos d on d.id=k.destino_id
+         where k.estado='mandada' and c.fase='lead' and c.etapa in ('esperando','recotizar')
+           and k.valida_hasta between (now() at time zone 'America/Argentina/Buenos_Aires')::date - 7 and (now() at time zone 'America/Argentina/Buenos_Aires')::date + 3
+         order by k.valida_hasta limit 20`),
     ]);
     const n = (f, e) => etapas.filter(r => r.fase === f && (!e || [].concat(e).includes(r.etapa))).reduce((s, r) => s + r.n, 0);
     const porCobrar = etapas.filter(r => (r.fase === 'oportunidad' && r.etapa !== 'sena_pagada') || (r.fase === 'venta' && r.etapa === 'saldo')).reduce((s, r) => s + r.total, 0);
@@ -174,7 +180,18 @@ module.exports = (app, { wrap, page }) => {
         <div class="acc"><form method=post action=/aviso/${a.id}/posponer><button title="Pasarlo a mañana">Mañana</button></form><form method=post action=/aviso/${a.id}/hecho><button class="g">Listo</button></form></div></div>`;
     };
     const itSal = s => { const d = Math.ceil((new Date(s.sale) - new Date(hoy)) / 864e5); return `<div class="av"><div class="dia ${d <= 7 ? 'hoy' : ''}"><b>${d}</b>días</div><div class="q"><a href="/caso/${s.id}"><b>${esc(s.nombre)}</b></a><div class="mut">${(s.dests || []).map(x => esc(x.nombre)).join(' + ') || esc(s.destino || '')} · sale el ${fecha(s.sale)}</div></div></div>`; };
-    const abajo = `<div class="dos">
+    const itVence = k => {
+      const f = String(k.valida_hasta.toISOString?.().slice(0, 10) || k.valida_hasta), dd = Math.round((new Date(f) - new Date(hoy)) / 864e5);
+      const cuando = dd < 0 ? `venció hace ${-dd} día${dd < -1 ? 's' : ''}` : dd === 0 ? 'vence hoy' : dd === 1 ? 'vence mañana' : `vence en ${dd} días`;
+      const d = new Date(f + 'T12:00:00');
+      return `<div class="av"><div class="dia ${dd <= 0 ? 'rojo' : dd === 1 ? 'hoy' : ''}"><b>${d.getDate()}</b>${d.toLocaleDateString('es-AR', { month: 'short' })}</div>
+        <div class="q"><a href="/caso/${k.caso}"><b>${esc(k.nombre)}</b></a> <span class=mut>· ${esc(k.destino || '')} v${k.version} · ${dinero(k.precio_pp, k.moneda)} pp</span>
+        <div class="mut"><b style="color:${dd <= 0 ? '#B84A53' : '#8A5A00'}">${cuando}</b>${k.aviso_vence_en ? ' · aviso armado el ' + fecha(k.aviso_vence_en) : ''}</div></div>
+        <div class="acc"><a class=btn href="/cotizacion/${k.id}/propuesta">Ver</a><form method=post action=/cotizacion/${k.id}/aviso-vence><button class="p">${dd < 0 ? 'Ofrecer actualizarla' : 'Avisarle que vence'}</button></form></div></div>`;
+    };
+    const secVence = `<section class="col" id="vencen" style="margin-top:14px;--c:#B7791F"><h2>⏳ Cotizaciones que vencen${vencen.length ? `<span class="num">${vencen.length}</span>` : ''}</h2>
+      ${vencen.map(itVence).join('') || '<div class="vacio">Ninguna cotización mandada vence en los próximos 3 días. ✓</div>'}</section>`;
+    const abajo = secVence + `<div class="dos">
       <section class="col" id="recordatorios"><h2>🔔 Recordatorios${vencidos ? `<span class="num" style="background:#B84A53">${vencidos} vencido${vencidos > 1 ? 's' : ''}</span>` : ''}</h2>${avisos.map(itAv).join('') || '<div class="vacio">No hay recordatorios. ✓</div>'}</section>
       <section class="col"><h2>🧳 Próximas salidas</h2>${salidas.map(itSal).join('') || '<div class="vacio">Nadie sale en los próximos 30 días.</div>'}</section></div>`;
 

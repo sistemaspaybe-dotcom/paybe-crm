@@ -108,7 +108,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     else bar = `<div class="aviso rojo">Perdido${c.baja_desde ? ' (en ' + esc(FASES[c.baja_desde]?.nombre || c.baja_desde) + ')' : ''}: ${esc(c.motivo_baja || '')}</div>`;
 
     // borrador de la IA
-    const etiquetaBorrador = { preguntas: 'La IA armó un solo mensaje con todo lo que falta', recordatorio: 'No contestó en 20 h: recordatorio (una sola vez)', seguimiento: 'Seguimiento de la cotización', repregunta: 'Contestó una parte: le pedimos lo que falta', presupuesto_bajo: 'Respuesta estándar: presupuesto bajo', sena: 'La seña no llegó: un solo mensaje', comprobante: 'Pedir el comprobante', saldo: 'Recordatorio del saldo' }[c.borrador_tipo] || 'Borrador';
+    const etiquetaBorrador = { preguntas: 'La IA armó un solo mensaje con todo lo que falta', recordatorio: 'No contestó en 20 h: recordatorio (una sola vez)', seguimiento: 'Seguimiento de la cotización', repregunta: 'Contestó una parte: le pedimos lo que falta', presupuesto_bajo: 'Respuesta estándar: presupuesto bajo', sena: 'La seña no llegó: un solo mensaje', comprobante: 'Pedir el comprobante', saldo: 'Recordatorio del saldo', vence: 'Aviso: vence la tarifa de la cotización' }[c.borrador_tipo] || 'Borrador';
     const chat = await canales.canalDe(c.id), puedeIG = !!chat?.puede;
     const borrador = c.borrador ? `<div class="card" style="border:2px solid var(--azul)"><span class="chip">${etiquetaBorrador} · revisalo y mandalo</span>
       <form method=post action=/caso/${c.id}/enviar style="margin-top:10px"><textarea name=texto id=borrador rows=${Math.min(14, 3 + (c.borrador.match(/\n/g) || []).length)}>${esc(c.borrador)}</textarea>
@@ -454,6 +454,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
 
   const marcarMandada = async (req, kk, c, d, por = 'a mano') => {
     const como = ' por ' + por;
+    if (kk.precio_pp == null && (kk.items || []).length) { const t = totales(kk.items); kk = await one('update cotizaciones set costo_pp=$1, precio_pp=$2, margen=$3 where id=$4 returning *', [t.costo, t.precio, t.pct, kk.id]); }
     const k = kk;
     await q(`update cotizaciones set estado='reemplazada' where destino_id=$1 and estado='mandada' and id<>$2`, [k.destino_id, k.id]);
     await q(`update cotizaciones set estado='mandada', enviada_en=now(), mandada=current_date, mandada_por=$2 where id=$1`, [k.id, por]);
@@ -496,6 +497,25 @@ module.exports = function (app, { wrap, page, log, hace }) {
       <span class=row>${k.estado === 'borrador' && d ? `<a class="btn p" href="/destino/${d.id}/cotizar">✎ Seguir editando</a>` : ''}<a class=btn href="/c/${k.token}" target=_blank rel=noopener>Abrir aparte ↗</a></span></div>
       ${envio}
       <iframe src="/c/${k.token}" style="width:100%;height:calc(100vh - 120px);min-height:700px;border:2px solid #F0E6E1;border-radius:14px;background:#fff"></iframe>`);
+  }));
+
+  // arma el mensaje "te recuerdo que vence la tarifa" para revisarlo y mandarlo desde la ficha
+  app.post('/cotizacion/:id/aviso-vence', wrap(async (req, res) => {
+    let k = await one('select * from cotizaciones where id=$1', [req.params.id]); if (!k) return res.status(404).send('No existe');
+    if (!k.token) k = await one('update cotizaciones set token=$1 where id=$2 returning *', [crypto.randomBytes(12).toString('hex'), k.id]);
+    const c = await one('select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.id=$1', [k.caso_id]);
+    const d = await one('select * from destinos where id=$1', [k.destino_id]);
+    const nombre = String(c.nombre || '').replace(/^@/, '').split(' ')[0];
+    const f = new Date(String(k.valida_hasta?.toISOString?.().slice(0, 10) || k.valida_hasta) + 'T12:00:00');
+    const hoy = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }) + 'T12:00:00');
+    const cuando = f < hoy ? `venció el ${f.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}` : +f === +hoy ? 'vence hoy' : `vale hasta el ${f.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '')}`;
+    const texto = f < hoy
+      ? `¡Hola ${nombre}! ¿Cómo estás? La tarifa de la propuesta para ${d?.nombre || 'tu viaje'} ${cuando}. Si te sigue interesando, la reviso con los proveedores y te paso los precios actualizados. ¿Querés que lo haga?`
+      : `¡Hola ${nombre}! ¿Cómo estás? Te recuerdo que la tarifa de la propuesta para ${d?.nombre || 'tu viaje'} ${cuando}; después los precios pueden cambiar. ¿Avanzamos con la reserva? Te la dejo de nuevo acá 👇\n${req.protocol}://${req.get('host')}/c/${k.token}`;
+    await q(`update casos set borrador=$1, borrador_tipo='vence', borrador_en=now() where id=$2`, [texto, c.id]);
+    await q('update cotizaciones set aviso_vence_en=now() where id=$1', [k.id]);
+    await log(c.id, req.session.quien, `Armó el aviso de vencimiento de ${d?.nombre} v${k.version}.`);
+    res.redirect('/caso/' + c.id);
   }));
 
   app.post('/cotizacion/:id/mandar', wrap(async (req, res) => {
