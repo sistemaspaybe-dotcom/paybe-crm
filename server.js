@@ -210,6 +210,13 @@ app.post('/caso/:id/:accion', wrap(async (req, res, next) => {
       await q(`insert into avisos(caso_id,para,texto) values($1,current_date,$2)`, [c.id, `Falta el comprobante (${a.pago.toLowerCase()} por ${medio.toLowerCase()})`]);
     }
   }
+  if (req.params.accion === 'sena') { // 3.3 · llegó la seña: se le avisa (sale solo si el chat lo deja; si no, queda armado)
+    const p = await one('select nombre from personas where id=$1', [c.persona_id]);
+    const k = await one(`select d.nombre from cotizaciones k left join destinos d on d.id=k.destino_id where k.caso_id=$1 and k.estado='aceptada' order by k.id desc limit 1`, [c.id]);
+    const texto = reglas.completar((await reglas.mensajes()).sena_recibida, { nombre: reglas.primerNombre(p.nombre), destino: k?.nombre || c.destino || 'el viaje', saldo_hasta: reglas.saldoHasta(c.sale) });
+    try { const por = await require('./src/canales').enviar(c.id, texto); await log(c.id, 'CRM', `3.3 · Se le avisó por ${por} que recibimos la seña.`); }
+    catch (e) { await q(`update casos set borrador=$1, borrador_tipo='sena_recibida', borrador_en=now() where id=$2 and borrador is null`, [texto, c.id]); await log(c.id, 'CRM', '3.3 · Quedó armado el mensaje de "recibimos tu seña" para mandarlo.'); }
+  }
   if (a.aviso) await q(`insert into avisos(caso_id,para,texto) values($1,current_date + $2::int,$3)`, [c.id, a.aviso[0], a.aviso[1]]);
   res.redirect('/caso/' + c.id);
 }));
