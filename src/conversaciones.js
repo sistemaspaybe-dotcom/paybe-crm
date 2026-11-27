@@ -41,7 +41,8 @@ const MOTIVOS_FILTRO = { no_consulta: 'No es una consulta', proveedor: 'Proveedo
 function preguntoAlgo(texto, c) {
   const t = String(texto || '').trim();
   if (c.borrador_tipo === 'preguntas' && c.borrador && t.slice(0, 40) === String(c.borrador).trim().slice(0, 40)) return true;
-  return /[?¿]/.test(t);
+  // tiene que preguntar algo del viaje: "¿quién es el chico del cumple?" no cuenta
+  return /[?¿]/.test(t) && /viaj|fecha|cu[aá]nd|cu[aá]nt|presupuesto|destino|sal[ei]n|d[ií]as|persona|adulto|menor|hotel|alojamiento|vuelo|a[eé]reo|categor|cotiz|propuesta/i.test(t);
 }
 async function filtrarConversacion(personaId, canal, quien, motivo = 'no_consulta') {
   await q(`update conversaciones set cerrada='filtrado', cerrada_en=now(), cerrada_por=$3, motivo=$4 where persona_id=$1 and canal=$2`, [personaId, canal, quien, motivo]);
