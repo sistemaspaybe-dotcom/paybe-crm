@@ -53,7 +53,13 @@ ${hilo.slice(-6000)}
 }
 
 // modo 'preguntar': además de leer, arma el mensaje con todo lo que falta
+// mientras el cliente solo haya saludado, la IA no lee el chat: se le contesta el saludo y se espera su respuesta
+async function soloSaludo(casoId) {
+  const r = await q('select texto from mensajes where caso_id=$1 and entrante', [casoId]);
+  return r.length > 0 && r.every(m => require('./conversaciones').esSaludo(m.texto));
+}
 async function analizar(casoId, { forzarPreguntas = false } = {}) {
+  if (!forzarPreguntas && await soloSaludo(casoId)) return;
   const c = await one('select c.*, p.nombre, p.whatsapp, p.mail from casos c join personas p on p.id=c.persona_id where c.id=$1', [casoId]);
   if (!c || c.fase !== 'lead') return;
   const hilo = await hiloDe(casoId);
@@ -80,7 +86,7 @@ Devolvé SOLO un JSON con esta forma (null cuando el cliente no lo dijo; no inve
  "aporta": true si en sus mensajes NUEVOS (los que están después de nuestra última respuesta) el cliente da algún dato del viaje o pide una cotización; false si solo saluda, escribe "prueba", manda un sticker, un emoji, un audio o algo sin datos,
  "solo_precio": true si pidió solo el precio o dijo que está comparando en varios lados,
  "faltan": [lo que falta de la lista de su tipo],
- "mensaje": ${repreguntar ? `ya se le hicieron las preguntas y contestó una parte. Tiene que sonar escrito por una persona, no por un bot: corto y natural, como "¡Gracias por tu respuesta, NOMBRE! Me sigue faltando saber X e Y" (si son 1 o 2 cosas, en una sola oración sin lista; si son más, lista corta). Nunca repitas un mensaje que PAYBE ya mandó en el chat. Pedile SOLO lo que todavía falta (para la categoría preguntá exactamente así: \"¿Cómo les gustaría viajar? Vuelo económico o business, y alojamiento: hotel 3, 4 o 5 estrellas, all inclusive o departamento\"; nunca preguntes para cuándo lo quiere confirmado) de los datos que se necesitan sí o sí (no repreguntes lo que ya dijo ni lo opcional): agradecele lo que mandó y pedile lo que falta, numerado si es más de una cosa, cálido y cercano, en español rioplatense, sin palabras guarangas, con un emoji como mucho. Si ya está todo, null.` : modoPreguntar ? `un único mensaje para mandarle por chat (Instagram o WhatsApp) preguntando TODO lo que falta junto, numerado, cálido y cercano, en español rioplatense, sin palabras guarangas, con un emoji como mucho. Saludá por el nombre. No preguntes lo que ya dijo (si dijo el mes o las fechas, no vuelvas a preguntar fechas; como mucho, cuántos días). Usá preguntas simples que cualquiera entienda. Para la categoría preguntá exactamente así: \"¿Cómo les gustaría viajar? Vuelo económico o business, y alojamiento: hotel 3, 4 o 5 estrellas, all inclusive o departamento\". Al final, fuera de la lista numerada, agregá: \"Si es por algo especial (cumpleaños, luna de miel, aniversario, despedida de solteros…), contanos así lo tenemos en cuenta 😊\" (si ya lo dijo, no). No preguntes para cuándo quiere tenerlo confirmado. Si hay varios destinos, aclará que vas a armar una propuesta para cada uno, que las respuestas sirven para todos y que si para alguno tiene algo particular o distinto lo cuente; si son viajes distintos, ordená las preguntas por viaje. Si no sabés si es un viaje combinado o está eligiendo, preguntalo ahí mismo. Si no falta nada, null.` : 'null'}}
+ "mensaje": ${repreguntar ? `ya se le hicieron las preguntas y contestó una parte. Tiene que sonar escrito por una persona, no por un bot: corto y natural, como "¡Gracias por tu respuesta, NOMBRE! Me sigue faltando saber X e Y" (si son 1 o 2 cosas, en una sola oración sin lista; si son más, lista corta). Nunca repitas un mensaje que PAYBE ya mandó en el chat. Pedile SOLO lo que todavía falta (para la categoría preguntá exactamente así: \"¿Cómo les gustaría viajar? Vuelo económico o business, y alojamiento: hotel 3, 4 o 5 estrellas, all inclusive o departamento\"; nunca preguntes para cuándo lo quiere confirmado) de los datos que se necesitan sí o sí (no repreguntes lo que ya dijo ni lo opcional): agradecele lo que mandó y pedile lo que falta, numerado si es más de una cosa, cálido y cercano, en español rioplatense, sin palabras guarangas, con un emoji como mucho. Si ya está todo, null.` : modoPreguntar ? `un único mensaje para mandarle por chat (Instagram o WhatsApp) preguntando TODO lo que falta junto, numerado, cálido y cercano, en español rioplatense, sin palabras guarangas, con un emoji como mucho. Saludá por el nombre (si PAYBE ya saludó en el chat, no vuelvas a decir hola ni a agradecer que escribió: andá directo a las preguntas). No preguntes lo que ya dijo (si dijo el mes o las fechas, no vuelvas a preguntar fechas; como mucho, cuántos días). Usá preguntas simples que cualquiera entienda. Para la categoría preguntá exactamente así: \"¿Cómo les gustaría viajar? Vuelo económico o business, y alojamiento: hotel 3, 4 o 5 estrellas, all inclusive o departamento\". Al final, fuera de la lista numerada, agregá: \"Si es por algo especial (cumpleaños, luna de miel, aniversario, despedida de solteros…), contanos así lo tenemos en cuenta 😊\" (si ya lo dijo, no). No preguntes para cuándo quiere tenerlo confirmado. Si hay varios destinos, aclará que vas a armar una propuesta para cada uno, que las respuestas sirven para todos y que si para alguno tiene algo particular o distinto lo cuente; si son viajes distintos, ordená las preguntas por viaje. Si no sabés si es un viaje combinado o está eligiendo, preguntalo ahí mismo. Si no falta nada, null.` : 'null'}}
 Ya conocidos: nombre ${JSON.stringify(c.nombre)}${destinosAntes.length ? `, destinos ${JSON.stringify(destinosAntes.map(d => d.nombre))}` : ''}.
 
 <conversacion>
@@ -90,7 +96,7 @@ ${hilo}
   if (!d || typeof d !== 'object') throw new Error('la respuesta de la IA no vino en el formato esperado');
 
   // 1 · ¿es una consulta? Solo se filtra si el equipo todavía no le escribió
-  if (d.es_consulta === false && c.etapa === 'nuevo' && !await one('select 1 from mensajes where caso_id=$1 and not entrante', [c.id])
+  if (d.es_consulta === false && c.etapa === 'nuevo' && !await one('select 1 from mensajes where caso_id=$1 and not entrante and auto is null', [c.id])
     && !await one(`select 1 from actividad where caso_id=$1 and texto like 'Era una consulta%'`, [c.id])) { // si el equipo dijo que es consulta, la IA no lo vuelve a filtrar
     await require('./conversaciones').filtrarCaso(c.id, 'IA');
     return;
@@ -165,8 +171,8 @@ const repreguntaFija = (nombre, faltan) => { const n = nombre ? ' ' + String(nom
 // para cotizar. No se manda solo, porque sin IA no sabemos si es una consulta o un mensaje personal.
 async function preguntasSinIA(casoId) {
   const c = await one(`select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.id=$1`, [casoId]);
-  if (!c || c.fase !== 'lead' || c.etapa !== 'nuevo' || c.borrador) return;
-  if (await one('select 1 from mensajes where caso_id=$1 and not entrante limit 1', [casoId])) return; // ya le contestaron
+  if (!c || c.fase !== 'lead' || c.etapa !== 'nuevo' || c.borrador || await soloSaludo(casoId)) return;
+  if (await one('select 1 from mensajes where caso_id=$1 and not entrante and auto is null limit 1', [casoId])) return; // ya le contestaron (el saludo automático no cuenta)
   const faltan = reglas.faltanParaCotizar(c, await q(`select * from destinos where caso_id=$1 and estado<>'descartado'`, [casoId]));
   if (!faltan.length) return;
   const nombre = reglas.primerNombre(c.nombre);
@@ -184,7 +190,7 @@ async function mandarSolo(casoId, texto, { repregunta = false } = {}) {
   // nunca dos mensajes automáticos en menos de 12 h al mismo chat
   if (await one(`select 1 from actividad where caso_id=$1 and quien='IA' and texto like 'La IA le mandó sola%' and creada > now() - interval '12 hours'`, [casoId])) return;
   // si el equipo le escribió a mano en las últimas 12 h, la conversación la lleva el equipo
-  if (!repregunta && await one(`select 1 from mensajes where caso_id=$1 and not entrante and creado > now() - interval '12 hours'`, [casoId])) return;
+  if (!repregunta && await one(`select 1 from mensajes where caso_id=$1 and not entrante and auto is null and creado > now() - interval '12 hours'`, [casoId])) return;
   const ult = await one('select entrante, creado from mensajes where caso_id=$1 order by creado desc limit 1', [casoId]);
   if (!ult || !ult.entrante || Date.now() - new Date(ult.creado) > 23 * 3600e3) return;
   const canales = require('./canales');

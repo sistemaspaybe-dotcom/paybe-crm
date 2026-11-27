@@ -61,6 +61,7 @@ create table if not exists mensajes (
   caso_id int references casos(id) on delete set null, canal text not null default 'instagram',
   mid text unique, entrante boolean not null, texto text, creado timestamptz default now());
 create index if not exists mensajes_caso on mensajes(caso_id, creado);
+alter table mensajes add column if not exists auto text; -- 'saludo': respuesta automática a un "Hola" (no cuenta como que el equipo contestó)
 create table if not exists ajustes (clave text primary key, valor text);
 alter table casos add column if not exists borrador text;
 alter table casos add column if not exists borrador_tipo text;
