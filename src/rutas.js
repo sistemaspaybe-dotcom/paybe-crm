@@ -29,8 +29,8 @@ const subtabs = (c, ds, cots, activo) => {
   for (const d of ds) {
     const ks = cots.filter(k => k.destino_id === d.id);
     const b = ks.find(k => k.estado === 'borrador'), m = [...ks].reverse().find(k => k.estado !== 'borrador' && k.estado !== 'reemplazada' && k.token);
-    if (b) tabs.push(`<a class="st${activo === 'd' + d.id ? ' on' : ''}" href="/destino/${d.id}/cotizar">✎ ${esc(d.nombre)} · v${b.version}</a>`);
-    else if (m) tabs.push(`<a class="st" href="/c/${m.token}" target=_blank rel=noopener>📄 ${esc(d.nombre)} · v${m.version} ↗</a>`);
+    if (b) tabs.push(`<a class="st${activo === 'd' + d.id ? ' on' : ''}" href="/destino/${d.id}/cotizar">✎ ${esc(d.nombre)} · v${b.version}</a>`, `<a class="st${activo === 'p' + b.id ? ' on' : ''}" href="/cotizacion/${b.id}/propuesta">👁 Propuesta v${b.version}</a>`);
+    else if (m) tabs.push(`<a class="st${activo === 'p' + m.id ? ' on' : ''}" href="/cotizacion/${m.id}/propuesta">📄 ${esc(d.nombre)} · v${m.version}</a>`);
   }
   return `<style>.subtabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:2px solid #F0E6E1;margin:14px 0 10px}.subtabs .st{padding:9px 14px;border-radius:10px 10px 0 0;background:#FBE9E6;color:#5A6670;font-weight:700;font-size:14px;text-decoration:none;margin-bottom:-2px;border:2px solid transparent;border-bottom:none}.subtabs .st:hover{color:var(--azul)}.subtabs .st.on{background:#fff;color:var(--azul);border-color:#F0E6E1}</style><div class=subtabs>${tabs.join('')}</div>`;
 };
@@ -426,7 +426,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     <div style="grid-column:1/-1"><label>No incluye (sale en la propuesta)</label><input name=no_incluye value="${esc(k.no_incluye)}"></div></div></div>
     <div class="card" id=resumen><h2>Resumen · por persona</h2><table><tr><td>Costo</td><td id=r_costo style="text-align:right"></td></tr><tr><td>Margen</td><td id=r_margen style="text-align:right"></td></tr><tr><td><b>Precio</b></td><td id=r_precio style="text-align:right;font-size:20px;font-weight:700"></td></tr><tr id=f_opc style="display:none"><td class=mut>Opcionales (aparte)</td><td id=r_opc class=mut style="text-align:right"></td></tr></table>
     <div id=r_presu class="aviso" style="margin-top:8px"></div><div id=r_alerta class="aviso rojo" style="display:none">Margen bajo: menos del 10%. Revisalo antes de mandar.</div><div class=mut id=r_total></div></div></div>
-    <div class="card row"><button name=accion value=guardar>Guardar</button><button name=accion value=ver formtarget=_blank>Guardar y ver la propuesta ↗</button>${ig_ok ? `<button class="p" name=accion value=mandar_chat>Mandar por ${chat.nombre}</button>` : ''}<button class="${ig_ok ? '' : 'p'}" name=accion value=mandar_manual>${ig_ok ? 'Ya la mandé por otro lado' : 'Ya la mandé (WhatsApp o la app)'}</button>
+    <div class="card row"><button name=accion value=guardar>Guardar</button><button name=accion value=ver>Guardar y ver la propuesta</button>${ig_ok ? `<button class="p" name=accion value=mandar_chat>Mandar por ${chat.nombre}</button>` : ''}<button class="${ig_ok ? '' : 'p'}" name=accion value=mandar_manual>${ig_ok ? 'Ya la mandé por otro lado' : 'Ya la mandé (WhatsApp o la app)'}</button>
     ${chat && !chat.ventana ? `<span class=mut>Pasaron más de 24 h desde su último mensaje: ${chat.nombre} no deja mandarla desde el CRM. Abrí la propuesta, copiá el link y mandalo desde la app.</span>` : ''}</div></form>
     <script>
     const presuUSD=${Number(d.presupuesto_usd) || 0};const f=n=>(moneda.value==='ARS'?'$ ':'USD ')+Math.round(n).toLocaleString('es-AR');
@@ -443,6 +443,62 @@ module.exports = function (app, { wrap, page, log, hace }) {
     r_total.textContent=p?'Seña: '+f(p*(parseFloat(document.querySelector('[name=sena_pct]').value)||0)/100)+' por persona':''}
     document.addEventListener('input',calc);document.addEventListener('change',calc);calc();
     </script>`, '/leads');
+  }));
+
+  const marcarMandada = async (req, kk, c, d, como = '') => {
+    const k = kk;
+    await q(`update cotizaciones set estado='reemplazada' where destino_id=$1 and estado='mandada' and id<>$2`, [k.destino_id, k.id]);
+    await q(`update cotizaciones set estado='mandada', enviada_en=now(), mandada=current_date where id=$1`, [k.id]);
+    await q(`update destinos set estado='cotizado' where id=$1`, [k.destino_id]);
+    await q(`update avisos set hecho=true where caso_id=$1 and texto='Está para cotizar'`, [k.caso_id]);
+    const pendientes = await one(`select count(*)::int n from destinos where caso_id=$1 and estado='cotizando'`, [c.id]);
+    if (c.fase === 'lead' && !pendientes.n) await q(`update casos set etapa='esperando', cotizando_por=null, cotizando_desde=null, actualizado=now() where id=$1`, [c.id]);
+    const min = Math.round((Date.now() - new Date(kk.inicio || kk.creada)) / 60e3);
+    await log(c.id, req.session.quien, `Cotización de ${d?.nombre} v${kk.version} mandada${como} (${dinero(kk.precio_pp, kk.moneda)} pp). Se armó en ${min} min.${c.fase === 'lead' && !pendientes.n ? ' Pasa a Esperando respuesta.' : ''}`);
+    if (kk.valida_hasta) await q(`insert into avisos(caso_id,para,texto) values($1,$2::date - 1,$3)`, [c.id, kk.valida_hasta, `Mañana vence la tarifa de ${d?.nombre}`]);
+  };
+  const textoPropuesta = (c, d, link) => `¡Hola ${String(c.nombre || '').replace(/^@/, '').split(' ')[0]}! Te paso la propuesta para ${d?.nombre || 'tu viaje'} 👇\n${link}\nCualquier duda o si querés ajustar algo, escribinos por acá.`;
+
+  // la propuesta como subpestaña dentro del CRM (se ve tal cual la ve el cliente)
+  app.get('/cotizacion/:id/propuesta', wrap(async (req, res) => {
+    let k = await one('select * from cotizaciones where id=$1', [req.params.id]); if (!k) return res.status(404).send('No existe');
+    if (!k.token) k = await one('update cotizaciones set token=$1 where id=$2 returning *', [crypto.randomBytes(12).toString('hex'), k.id]);
+    const c = await one('select c.*, p.nombre, p.whatsapp, p.mail, p.instagram_user from casos c join personas p on p.id=c.persona_id where c.id=$1', [k.caso_id]);
+    const d = await one('select * from destinos where id=$1', [k.destino_id]);
+    const [ds, cots] = await Promise.all([q('select * from destinos where caso_id=$1 order by id', [c.id]), q('select * from cotizaciones where caso_id=$1 order by destino_id, version, id', [c.id])]);
+    const link = `${req.protocol}://${req.get('host')}/c/${k.token}`;
+    const chat = await canales.canalDe(c.id), texto = textoPropuesta(c, d, link), borrador = k.estado === 'borrador';
+    const wa = String(c.whatsapp || chat?.canal === 'whatsapp' && chat.destino || '').replace(/\D/g, '');
+    const ig = c.instagram_user || '';
+    const copiar = `navigator.clipboard.writeText(${esc(JSON.stringify(texto))});`;
+    const opciones = [
+      chat?.puede ? `<form method=post action=/cotizacion/${k.id}/mandar style="display:inline"><input type=hidden name=como value=chat><button class=p>Mandar por ${chat.nombre}</button></form>` : '',
+      wa && !(chat?.puede && chat.canal === 'whatsapp') ? `<a class="btn${chat?.canal === 'whatsapp' ? ' p' : ''}" href="https://wa.me/${wa}?text=${encodeURIComponent(texto)}" target=_blank rel=noopener>Abrir WhatsApp con el mensaje ↗</a>` : '',
+      ig && !(chat?.puede && chat.canal === 'instagram') ? `<a class="btn${chat?.canal === 'instagram' ? ' p' : ''}" href="https://ig.me/m/${encodeURIComponent(ig.replace(/^@/, ''))}" target=_blank rel=noopener onclick="${copiar}">Copiar mensaje y abrir Instagram ↗</a>` : '',
+      c.mail ? `<a class=btn href="mailto:${esc(c.mail)}?subject=${encodeURIComponent('Propuesta de viaje · ' + (d?.nombre || ''))}&body=${encodeURIComponent(texto)}">Mandar por mail</a>` : '',
+      `<button type=button onclick="${copiar}this.textContent='Mensaje copiado ✓'">Copiar mensaje con el link</button>`,
+      `<button type=button onclick="document.querySelector('iframe').contentWindow.print()">Descargar PDF</button>`,
+    ].filter(Boolean).join('');
+    const envio = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${borrador ? 'Mandársela' : 'Volver a mandársela'}</h2>${chat ? `<span class=mut>Escribió por ${chat.nombre}${chat.ventana ? '' : ' hace más de 24 h (no se puede mandar desde el CRM)'}</span>` : ''}</div>
+      <div class=row style="margin-top:10px;gap:8px;flex-wrap:wrap">${opciones}</div>
+      ${borrador ? `<form method=post action=/cotizacion/${k.id}/mandar class=row style="margin-top:10px;gap:8px;align-items:center"><input type=hidden name=como value=manual><span class=mut>¿La mandaste por WhatsApp, Instagram, mail o el PDF desde afuera?</span><button>Ya la mandé → Esperando respuesta</button></form>` : `<p class=mut style="margin-top:8px">Ya está mandada${k.mandada ? ' (' + fecha(k.mandada) + ')' : ''}.</p>`}</div>`;
+    page(req, res, 'Propuesta ' + (d?.nombre || ''), `<div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1>${barraLinks(c)}${subtabs(c, ds, cots, 'p' + k.id)}
+      <div class="row" style="justify-content:space-between;margin:6px 0 10px"><h2 style="margin:0">${esc(d?.nombre || k.viaje || '')} · propuesta v${k.version}${k.estado === 'borrador' ? ' <span class=chip>borrador</span>' : ''}</h2>
+      <span class=row>${k.estado === 'borrador' && d ? `<a class="btn p" href="/destino/${d.id}/cotizar">✎ Seguir editando</a>` : ''}<a class=btn href="/c/${k.token}" target=_blank rel=noopener>Abrir aparte ↗</a></span></div>
+      ${envio}
+      <iframe src="/c/${k.token}" style="width:100%;height:calc(100vh - 120px);min-height:700px;border:2px solid #F0E6E1;border-radius:14px;background:#fff"></iframe>`);
+  }));
+
+  app.post('/cotizacion/:id/mandar', wrap(async (req, res) => {
+    const kk = await one('select * from cotizaciones where id=$1', [req.params.id]); if (!kk) return res.status(404).send('No existe');
+    const c = await one('select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.id=$1', [kk.caso_id]);
+    const d = await one('select * from destinos where id=$1', [kk.destino_id]);
+    if (req.body.como === 'chat') {
+      try { await canales.enviar(c.id, textoPropuesta(c, d, `${req.protocol}://${req.get('host')}/c/${kk.token}`)); }
+      catch (e) { await log(c.id, 'CRM', 'No se pudo mandar la propuesta: ' + e.message); return res.redirect(`/cotizacion/${kk.id}/propuesta`); }
+    }
+    if (kk.estado === 'borrador') await marcarMandada(req, kk, c, d, req.body.como === 'chat' ? '' : ' (a mano)');
+    res.redirect('/caso/' + c.id);
   }));
 
   app.post('/cotizacion/:id', wrap(async (req, res) => {
@@ -462,26 +518,17 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const accion = b.accion || 'guardar';
     if (accion === 'guardar') return res.redirect(`/destino/${k.destino_id}/cotizar`);
     const kk = await one('select * from cotizaciones where id=$1', [k.id]);
-    if (accion === 'ver') return res.redirect('/c/' + kk.token);
+    if (accion === 'ver') return res.redirect(`/cotizacion/${kk.id}/propuesta`);
     // mandar
     const c = await one('select c.*, p.nombre, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [k.caso_id]);
     const d = await one('select * from destinos where id=$1', [k.destino_id]);
     const link = `${req.protocol}://${req.get('host')}/c/${kk.token}`;
     if (accion === 'mandar_chat') {
-      const nombre = String(c.nombre || '').replace(/^@/, '').split(' ')[0];
-      const texto = `¡Hola ${nombre}! Te paso la propuesta para ${d?.nombre || 'tu viaje'} 👇\n${link}\nCualquier duda o si querés ajustar algo, escribinos por acá.`;
+      const texto = textoPropuesta(c, d, link);
       try { await canales.enviar(c.id, texto); }
       catch (e) { await log(c.id, 'CRM', 'No se pudo mandar la propuesta: ' + e.message); return res.redirect(`/destino/${k.destino_id}/cotizar`); }
     }
-    await q(`update cotizaciones set estado='reemplazada' where destino_id=$1 and estado='mandada' and id<>$2`, [k.destino_id, k.id]);
-    await q(`update cotizaciones set estado='mandada', enviada_en=now(), mandada=current_date where id=$1`, [k.id]);
-    await q(`update destinos set estado='cotizado' where id=$1`, [k.destino_id]);
-    await q(`update avisos set hecho=true where caso_id=$1 and texto='Está para cotizar'`, [k.caso_id]);
-    const pendientes = await one(`select count(*)::int n from destinos where caso_id=$1 and estado='cotizando'`, [c.id]);
-    if (c.fase === 'lead' && !pendientes.n) await q(`update casos set etapa='esperando', cotizando_por=null, cotizando_desde=null, actualizado=now() where id=$1`, [c.id]);
-    const min = Math.round((Date.now() - new Date(kk.inicio || kk.creada)) / 60e3);
-    await log(c.id, req.session.quien, `Cotización de ${d?.nombre} v${kk.version} mandada (${dinero(kk.precio_pp, kk.moneda)} pp). Se armó en ${min} min.${c.fase === 'lead' && !pendientes.n ? ' Pasa a Esperando respuesta.' : ''}`);
-    if (kk.valida_hasta) await q(`insert into avisos(caso_id,para,texto) values($1,$2::date - 1,$3)`, [c.id, kk.valida_hasta, `Mañana vence la tarifa de ${d?.nombre}`]);
+    await marcarMandada(req, kk, c, d);
     res.redirect('/caso/' + c.id);
   }));
 
