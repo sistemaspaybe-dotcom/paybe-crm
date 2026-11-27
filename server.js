@@ -95,6 +95,9 @@ app.post('/caso/:id/aviso', wrap(async (req, res) => {
 }));
 app.post('/caso/:id/baja', wrap(async (req, res) => {
   const c = await one('select * from casos where id=$1', [req.params.id]);
+  const otro = String(req.body.otro || '').trim();
+  if (req.body.motivo === 'Otro' && !otro) return res.redirect('/caso/' + c.id);
+  if (req.body.motivo === 'Otro') req.body.motivo = 'Otro: ' + otro.slice(0, 200);
   await q(`update casos set fase='baja', etapa='baja', baja_desde=$1, motivo_baja=$2, actualizado=now() where id=$3`, [c.fase, req.body.motivo, c.id]);
   await q('update avisos set hecho=true where caso_id=$1', [c.id]);
   await q(`update destinos set estado='descartado' where caso_id=$1 and estado not in ('eligio','no_eligio','descartado')`, [c.id]);
