@@ -94,13 +94,13 @@ async function registrar({ igsid, username, nombre, mid, entrante, texto, cuando
 }
 
 // ---- mandar un mensaje desde el CRM (sale desde la cuenta de Paybe) ----
-async function enviar(igsid, texto) {
+async function enviar(igsid, texto, { agente = false } = {}) {
   if (String(igsid).startsWith('demo-')) return 'demo-out-' + Date.now(); // consultas de prueba: no sale nada a Instagram
   if (STAGING) throw new Error('Staging: no se manda nada a Instagram');
   const t = await token(); if (!t) throw new Error('Falta IG_ACCESS_TOKEN');
   const r = await fetch(API + '/me/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + t, 'content-type': 'application/json' },
-    body: JSON.stringify({ recipient: { id: String(igsid) }, message: { text: String(texto).slice(0, 1000) } }) }).then(r => r.json());
-  if (r.error) throw new Error(r.error.message || 'Instagram no dejó mandar el mensaje');
+    body: JSON.stringify({ recipient: { id: String(igsid) }, message: { text: String(texto).slice(0, 1000) }, ...(agente ? { messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}) }) }).then(r => r.json());
+  if (r.error) throw new Error(agente ? 'Instagram no dejó responder después de 24 h (' + (r.error.message || 'falta el permiso Human Agent') + '). Mandalo desde la app.' : r.error.message || 'Instagram no dejó mandar el mensaje');
   return r.message_id || r.mid || null;
 }
 

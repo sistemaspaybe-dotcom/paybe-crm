@@ -140,9 +140,9 @@ async function mandarSolo(casoId, texto, { repregunta = false } = {}) {
   const ult = await one('select entrante, creado from mensajes where caso_id=$1 order by creado desc limit 1', [casoId]);
   if (!ult || !ult.entrante || Date.now() - new Date(ult.creado) > 23 * 3600e3) return;
   const canales = require('./canales');
-  if (!(await canales.canalDe(casoId))?.puede) return;
+  if (!(await canales.canalDe(casoId, { auto: true }))?.puede) return;
   try {
-    const por = await canales.enviar(casoId, texto);
+    const por = await canales.enviar(casoId, texto, { auto: true });
     await anotar(casoId, 'La IA le mandó sola las preguntas para cotizar por ' + por + '.');
   } catch (e) { await anotar(casoId, 'No se pudieron mandar solas las preguntas: ' + e.message + '. Quedó el borrador para mandarlo a mano.'); }
 }

@@ -34,4 +34,14 @@ ${process.env.STAGING === 'true' ? '<div style="background:#8A5A00;color:#fff;te
 const chipFase = f => `<span class="chip ${{ oportunidad: 'op', venta: 've', baja: 'ba' }[f] || ''}">`;
 // fecha de un campo "date" (nacimiento, vencimiento): sin corrimiento de zona horaria y con año
 const fechaDia = d => d ? new Date(String(d.toISOString?.().slice(0, 10) || d).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
-module.exports = { esc, fecha, fechaDia, usd, dinero, layout, chipFase };
+// de dónde viene: el canal del último mensaje, o el origen con que se cargó
+const CANALES = { instagram: ['Instagram', '#C13584', '#FCE8F3'], whatsapp: ['WhatsApp', '#128C4B', '#E3F6EA'], mail: ['Mail', '#2B5C8A', '#E3EEF7'], oficina: ['Oficina', '#8A5A00', '#FFF3D6'], otro: ['Cargado a mano', '#5A6670', '#F1F1F1'] };
+const canalDeCaso = c => { const x = String(c.u_canal || c.origen || '').toLowerCase(); return x.includes('insta') ? 'instagram' : x.includes('whats') ? 'whatsapp' : x.includes('mail') ? 'mail' : /oficina|tel/.test(x) ? 'oficina' : 'otro'; };
+const LOGOS = {
+  instagram: '<svg width=28 height=28 viewBox="0 0 24 24"><defs><radialGradient id=ig cx="30%" cy="107%" r="150%"><stop offset="0" stop-color="#fdf497"/><stop offset=".1" stop-color="#fdf497"/><stop offset=".5" stop-color="#fd5949"/><stop offset=".7" stop-color="#d6249f"/><stop offset="1" stop-color="#285AEB"/></radialGradient></defs><rect width=24 height=24 rx=6 fill="url(#ig)"/><rect x=5 y=5 width=14 height=14 rx=4 fill=none stroke=#fff stroke-width=1.8 /><circle cx=12 cy=12 r=3.3 fill=none stroke=#fff stroke-width=1.8 /><circle cx=16.6 cy=7.4 r=1.1 fill=#fff /></svg>',
+  whatsapp: '<svg width=28 height=28 viewBox="0 0 24 24"><rect width=24 height=24 rx=6 fill="#25D366"/><path d="M12 4.6a7.3 7.3 0 0 0-6.3 11l-1 3.8 3.9-1A7.3 7.3 0 1 0 12 4.6z" fill=none stroke=#fff stroke-width=1.6 stroke-linejoin=round /><path d="M9.6 8.6c.2-.4.4-.4.6-.4h.4c.2 0 .3.1.4.3l.6 1.4c.1.2 0 .4-.1.5l-.4.5c-.1.1-.1.3 0 .4.5.9 1.2 1.6 2.1 2.1.2.1.3.1.4 0l.5-.6c.1-.2.3-.2.5-.1l1.4.6c.2.1.3.2.3.4 0 .5-.2 1-.6 1.3-.4.3-1 .4-1.5.3-2.1-.6-3.8-2.3-4.4-4.4-.2-.5-.1-1.1.2-1.6z" fill=#fff /></svg>',
+  mail: '<svg width=28 height=28 viewBox="0 0 24 24"><rect width=24 height=24 rx=6 fill="#2B5C8A"/><rect x=5 y=7 width=14 height=10 rx=1.5 fill=none stroke=#fff stroke-width=1.6 /><path d="M5.5 7.8 12 12.5l6.5-4.7" fill=none stroke=#fff stroke-width=1.6 /></svg>',
+  oficina: '<svg width=28 height=28 viewBox="0 0 24 24"><rect width=24 height=24 rx=6 fill="#C9A227"/><path d="M6 18V9l6-4 6 4v9M10 18v-4h4v4" fill=none stroke=#fff stroke-width=1.7 stroke-linejoin=round /></svg>',
+  otro: '<svg width=28 height=28 viewBox="0 0 24 24"><rect width=24 height=24 rx=6 fill="#8A949C"/><path d="M8 16l7.5-7.5 1.5 1.5L9.5 17.5H8z" fill=#fff /></svg>',
+};
+module.exports = { esc, fecha, fechaDia, usd, dinero, layout, chipFase, CANALES, LOGOS, canalDeCaso };
