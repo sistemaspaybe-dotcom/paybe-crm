@@ -71,16 +71,21 @@ async function lista(req, res, fase, titulo, ruta) {
     exists (select 1 from mensajes m where m.caso_id=c.id and not m.entrante) respondimos, u.canal u_canal, u.texto u_texto, u.entrante u_entrante, u.creado u_creado, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id
     left join lateral (select m.canal, m.texto, m.entrante, m.creado from mensajes m where m.caso_id=c.id order by m.creado desc limit 1) u on true
     where c.fase=$1 order by c.actualizado desc`, [fase]);
+  const orden_ = req.query.orden === 'espera' ? 'espera' : 'nuevo', cuando = r => new Date(r.u_creado || r.actualizado).getTime();
+  rows.sort((a, b) => orden_ === 'espera' ? cuando(a) - cuando(b) : cuando(b) - cuando(a));
   if (fase === 'lead') rows.sort((a, b) => (conv.estadoChat(b) === 'te_toca' || conv.estadoChat(b) === 'nueva') - (conv.estadoChat(a) === 'te_toca' || conv.estadoChat(a) === 'nueva'));
   const orden = Object.keys(FASES[fase].etapas);
   // filtros arriba: primero qué hago (responder / esperar), después la etapa
   const toca = r => ['nueva', 'te_toca'].includes(conv.estadoChat(r)), espera = r => conv.estadoChat(r) === 'esperando';
   const f = String(req.query.ver || ''), filtro = f === 'toca' ? toca : f === 'espera' ? espera : orden.includes(f) ? r => r.etapa === f : null;
-  const chipF = (k, txt, n, col) => `<a class="chip" href="${f === k ? ruta : ruta + '?ver=' + k}" style="text-decoration:none;${f === k ? 'outline:2px solid var(--azul);' : ''}${col || ''}">${txt} · ${n}</a>`;
+  const chipF = (k, txt, n, col) => `<a class="chip" href="${f === k ? ruta + (req.query.orden ? '?orden=' + encodeURIComponent(req.query.orden) : '') : ruta + '?ver=' + k + (req.query.orden ? '&orden=' + encodeURIComponent(req.query.orden) : '')}" style="text-decoration:none;${f === k ? 'outline:2px solid var(--azul);' : ''}${col || ''}">${txt} · ${n}</a>`;
   const nT = rows.filter(toca).length, nE = rows.filter(espera).length;
-  const seg = (k, txt) => `<a href="${k ? ruta + '?ver=' + k : ruta}" style="padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:800;${(f || '') === k ? 'background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);' : ''}color:${k === 'toca' ? '#B84A53' : 'var(--azul)'}">${txt}</a>`;
+  const conOrden = req.query.orden ? 'orden=' + encodeURIComponent(req.query.orden) : '';
+  const seg = (k, txt) => `<a href="${k ? ruta + '?ver=' + k + (conOrden ? '&' + conOrden : '') : ruta + (conOrden ? '?' + conOrden : '')}" style="padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:800;${(f || '') === k ? 'background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);' : ''}color:${k === 'toca' ? '#B84A53' : 'var(--azul)'}">${txt}</a>`;
   const segmentos = `<div style="display:inline-flex;gap:4px;background:#F3E9E4;padding:4px;border-radius:12px;margin:4px 0 10px">${seg('toca', `● Te toca responder · ${nT}`)}${seg('espera', `⏳ Esperando al cliente · ${nE}`)}${seg('', `Todos · ${rows.length}`)}</div>`;
-  const porEtapa = segmentos + '<div><span class=mut style="font-size:13px;margin-right:6px">Etapa:</span>' + orden.map(e => chipF(e, FASES[fase].etapas[e], rows.filter(r => r.etapa === e).length)).join(' ') + '</div>';
+  const qOrden = o => { const u = new URLSearchParams(req.query); u.set('orden', o); return ruta + '?' + u; };
+  const selOrden = `<span style="float:right;margin-top:10px" class=mut>Ordenar: <a href="${qOrden('nuevo')}" style="${orden_ === 'nuevo' ? 'font-weight:800;color:var(--azul)' : ''}">más nuevos primero</a> · <a href="${qOrden('espera')}" style="${orden_ === 'espera' ? 'font-weight:800;color:var(--azul)' : ''}">el que más espera primero</a></span>`;
+  const porEtapa = selOrden + segmentos + '<div><span class=mut style="font-size:13px;margin-right:6px">Etapa:</span>' + orden.map(e => chipF(e, FASES[fase].etapas[e], rows.filter(r => r.etapa === e).length)).join(' ') + '</div>';
   const total = rows.length;
   if (filtro) rows.splice(0, rows.length, ...rows.filter(filtro));
   const tabs = (fase === 'lead' ? await conv.encabezado('leads', total) : `<h1>${titulo} · ${total}</h1>`) + (req.query.personal ? '<div class="aviso">Listo: marcado como personal. Se borraron sus mensajes y no vuelve a entrar nada de ese contacto. Se puede deshacer en Ajustes.</div>' : '') + (req.query.filtrado ? '<div class="aviso">Listo: pasó a Filtrados. Si fue un error, en Filtrados está "Es consulta".</div>' : '');
