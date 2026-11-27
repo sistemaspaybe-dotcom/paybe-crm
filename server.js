@@ -47,16 +47,37 @@ app.use((req, res, next) => { if (!req.session.quien) req.session.quien = 'Equip
 // ---- listas ----
 const SEMI = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };
 const chipsDestinos = c => (c.dests || []).filter(d => d && d.nombre).map(d => `<span class="chip" style="margin:2px 2px 0 0">${SEMI[d.semaforo] && ['pendiente', 'semaforo'].includes(d.estado) ? SEMI[d.semaforo] + ' ' : ''}${esc(d.nombre)}${d.estado === 'cotizado' ? ' · cotizado' : d.estado === 'eligio' ? ' ✓' : ''}</span>`).join('');
-const filaCaso = c => `<tr><td><a href="/caso/${c.id}"><b>${c.origen === 'Demo' ? '🧪 ' : ''}${esc(c.nombre)}</b></a><div>${chipsDestinos(c) || `<span class="mut">${esc(c.destino || '')}</span>`}</div>${c.borrador ? '<div class=mut>✎ Borrador para mandar</div>' : ''}</td><td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span>${conv.chipChat(c)}</td><td>${esc(c.servicio || '')}</td><td class="mut">${esc(c.fechas || '')} ${c.cuantos ? '· ' + esc(c.cuantos) : ''}</td><td class="mut">${fecha(c.actualizado)}</td></tr>`;
+// de dónde viene: el canal del último mensaje, o el origen con que se cargó
+const CANALES = { instagram: ['Instagram', '#C13584', '#FCE8F3'], whatsapp: ['WhatsApp', '#128C4B', '#E3F6EA'], mail: ['Mail', '#2B5C8A', '#E3EEF7'], oficina: ['Oficina', '#8A5A00', '#FFF3D6'], otro: ['Cargado a mano', '#5A6670', '#F1F1F1'] };
+const canalDe = c => { const x = String(c.u_canal || c.origen || '').toLowerCase(); return x.includes('insta') ? 'instagram' : x.includes('whats') ? 'whatsapp' : x.includes('mail') ? 'mail' : /oficina|tel/.test(x) ? 'oficina' : 'otro'; };
+const chipCanal = c => { const [n, col, bg] = CANALES[canalDe(c)]; return `<span class=chip style="background:${bg};color:${col};font-size:12px;padding:2px 8px">${n}</span>`; };
+// qué hago con este lead: le toca a ella responder, o estamos esperando al cliente
+const queHago = c => {
+  const e = conv.estadoChat(c);
+  if (e === 'nueva' || e === 'te_toca') return `<span style="color:#B84A53;font-weight:800">● Te toca responder</span>${c.borrador ? '<div class=mut style="font-size:13px">✎ hay un borrador listo</div>' : ''}${c.u_creado ? `<div class=mut style="font-size:13px">escribió ${hace(c.u_creado)}</div>` : ''}`;
+  if (e === 'esperando') return `<span style="color:#5A6670;font-weight:700">⏳ Esperando al cliente</span>${c.u_creado ? `<div class=mut style="font-size:13px">le escribimos ${hace(c.u_creado)}</div>` : ''}`;
+  return c.borrador ? '<span style="color:#B84A53;font-weight:800">✎ Mandar el borrador</span>' : '<span class=mut>Sin chat</span>';
+};
+const filaCaso = c => `<tr><td style="min-width:190px"><a href="/caso/${c.id}"><b>${c.origen === 'Demo' ? '🧪 ' : ''}${esc(c.nombre)}</b></a><div style="margin-top:4px">${chipCanal(c)}</div><div style="margin-top:4px">${chipsDestinos(c) || `<span class="mut">${esc(c.destino || '')}</span>`}</div></td>
+  <td style="max-width:380px">${c.u_texto != null ? `<a href="/caso/${c.id}" style="color:inherit;text-decoration:none;display:block"><span class=mut style="font-size:13px">${c.u_entrante ? esc(String(c.nombre || '').split(' ')[0]) + ':' : 'Vos:'}</span> <span style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(String(c.u_texto).slice(0, 200))}</span></a>` : `<span class=mut>${esc(c.destino || c.servicio || '—')}</span>`}</td>
+  <td style="min-width:180px">${queHago(c)}</td>
+  <td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span></td><td class="mut">${fecha(c.actualizado)}</td></tr>`;
 async function lista(req, res, fase, titulo, ruta) {
   const rows = await q(`select c.*, p.nombre,
     (select entrante from mensajes m where m.caso_id=c.id order by creado desc limit 1) ult_entrante,
-    exists (select 1 from mensajes m where m.caso_id=c.id and not m.entrante) respondimos, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id where c.fase=$1 order by c.actualizado desc`, [fase]);
+    exists (select 1 from mensajes m where m.caso_id=c.id and not m.entrante) respondimos, u.canal u_canal, u.texto u_texto, u.entrante u_entrante, u.creado u_creado, (select json_agg(json_build_object('nombre',d.nombre,'semaforo',d.semaforo,'estado',d.estado) order by d.id) from destinos d where d.caso_id=c.id and d.estado<>'descartado') dests, p.origen from casos c join personas p on p.id=c.persona_id
+    left join lateral (select m.canal, m.texto, m.entrante, m.creado from mensajes m where m.caso_id=c.id order by m.creado desc limit 1) u on true
+    where c.fase=$1 order by c.actualizado desc`, [fase]);
   if (fase === 'lead') rows.sort((a, b) => (conv.estadoChat(b) === 'te_toca' || conv.estadoChat(b) === 'nueva') - (conv.estadoChat(a) === 'te_toca' || conv.estadoChat(a) === 'nueva'));
   const orden = Object.keys(FASES[fase].etapas);
-  const porEtapa = orden.map(e => `<span class="chip">${FASES[fase].etapas[e]} · ${rows.filter(r => r.etapa === e).length}</span>`).join(' ');
+  // filtros arriba: primero qué hago (responder / esperar), después la etapa
+  const toca = r => ['nueva', 'te_toca'].includes(conv.estadoChat(r)), espera = r => conv.estadoChat(r) === 'esperando';
+  const f = String(req.query.ver || ''), filtro = f === 'toca' ? toca : f === 'espera' ? espera : orden.includes(f) ? r => r.etapa === f : null;
+  const chipF = (k, txt, n, col) => `<a class="chip" href="${f === k ? ruta : ruta + '?ver=' + k}" style="text-decoration:none;${f === k ? 'outline:2px solid var(--azul);' : ''}${col || ''}">${txt} · ${n}</a>`;
+  const porEtapa = chipF('toca', '● Te toca responder', rows.filter(toca).length, 'background:#FBE3E0;color:#B84A53;') + ' ' + chipF('espera', '⏳ Esperando al cliente', rows.filter(espera).length) + '<span style="display:inline-block;width:14px"></span>' + orden.map(e => chipF(e, FASES[fase].etapas[e], rows.filter(r => r.etapa === e).length)).join(' ');
+  if (filtro) rows.splice(0, rows.length, ...rows.filter(filtro));
   const tabs = (fase === 'lead' ? await conv.encabezado('leads', rows.length) : `<h1>${titulo} · ${rows.length}</h1>`) + (req.query.personal ? '<div class="aviso">Listo: marcado como personal. Se borraron sus mensajes y no vuelve a entrar nada de ese contacto. Se puede deshacer en Ajustes.</div>' : '') + (req.query.filtrado ? '<div class="aviso">Listo: pasó a Filtrados. Si fue un error, en Filtrados está "Es consulta".</div>' : '');
-  page(req, res, titulo, `${tabs}<p>${porEtapa}</p><div class="card"><table><tr><th>Persona</th><th>Etapa</th><th>Servicio</th><th>Viaje</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
+  page(req, res, titulo, `${tabs}<p>${porEtapa}</p><div class="card"><table><tr><th>Persona y canal</th><th>Último mensaje</th><th>Qué hago</th><th>Etapa del lead</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=5 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
 }
 conv.rutas(app, { wrap, page, log, ig });
 app.get('/leads', wrap((req, res) => lista(req, res, 'lead', 'Leads', '/leads')));
