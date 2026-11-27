@@ -396,7 +396,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
   }));
   app.post('/caso/:id/leer', wrap(async (req, res) => {
     const c = await one('select etapa from casos where id=$1', [req.params.id]);
-    await ia.enCola(() => ia.analizar(req.params.id, { forzarPreguntas: ['nuevo', 'preguntando'].includes(c?.etapa) }));
+    await ia.enCola(() => ia.analizar(req.params.id, { forzarPreguntas: ['nuevo', 'preguntando'].includes(c?.etapa) }), req.params.id);
     res.redirect('/caso/' + req.params.id);
   }));
   app.post('/caso/:id/chat', wrap(async (req, res) => {
