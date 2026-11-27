@@ -570,6 +570,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     let k = await one('select * from cotizaciones where id=$1', [req.params.id]); if (!k) return res.status(404).send('No existe');
     if (!k.token) k = await one('update cotizaciones set token=$1 where id=$2 returning *', [crypto.randomBytes(12).toString('hex'), k.id]);
     const c = await one('select c.*, p.nombre, p.whatsapp, p.mail, p.instagram_user from casos c join personas p on p.id=c.persona_id where c.id=$1', [k.caso_id]);
+    if (!c) return res.redirect('/c/' + k.token); // cotización suelta (registrada a mano, sin consulta)
     const d = await one('select * from destinos where id=$1', [k.destino_id]);
     const [ds, cots] = await Promise.all([q('select * from destinos where caso_id=$1 order by id', [c.id]), q('select * from cotizaciones where caso_id=$1 order by destino_id, version, id', [c.id])]);
     const link = `${req.protocol}://${req.get('host')}/c/${k.token}`;

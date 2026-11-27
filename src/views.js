@@ -20,6 +20,37 @@ input,select,textarea{font:inherit;border:1px solid var(--linea);border-radius:1
 label{font-size:12px;font-weight:600;color:#5A6670;display:block;margin-bottom:3px}.f{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
 .bar{display:flex;gap:3px;margin:8px 0}.bar div{flex:1;text-align:center;padding:10px 6px;font-weight:700;font-size:13px;background:#FBE9E6;color:#5A6670;border-radius:8px}
 .bar .ok{background:#E0F0E6;color:var(--verde)}.bar .now{background:var(--verde);color:#fff}
+/* celular (iPhone): todo en una columna, las tablas como tarjetas y las barras de etapas se deslizan de costado */
+@media (max-width:760px){
+  body{font-size:15px;-webkit-text-size-adjust:100%}
+  nav{flex-wrap:nowrap;overflow-x:auto;gap:14px;padding:8px 12px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}nav a,nav span{white-space:nowrap;flex:0 0 auto}nav .sp{display:none}
+  main{padding:12px}h1{font-size:26px}h2{font-size:20px}
+  .card{padding:12px 14px;border-radius:12px}
+  input,select,textarea{font-size:16px} /* sin esto el iPhone hace zoom al escribir */
+  .btn,button{padding:9px 12px}
+  .grid,.f{grid-template-columns:1fr}
+  .grid>*,.f>*,.cols>*,.dos>*{min-width:0}
+  .opcion,.o-card,.o-card>*{min-width:0}.o-campos{grid-template-columns:1fr !important}.o-campos>*{grid-column:auto !important}.ciudad input.dias{width:90px !important;flex:0 0 90px}
+  .cols,.dos,.anillos{grid-template-columns:1fr !important}
+  /* tablas → tarjetas apiladas */
+  table,tbody,tr,td{display:block;width:100%}
+  table tr:has(> th){display:none}
+  table tr{border-top:1px solid #F0E6E1;padding:10px 0}table tr:first-child{border-top:none}
+  td{border:none;padding:3px 0}
+  td[style*="text-align:right"],td[style*="text-align: right"]{text-align:left !important}
+  /* barras de etapas (ficha y listas): se deslizan de costado */
+  .bar{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.bar::-webkit-scrollbar{display:none}
+  .bar>div{flex:0 0 auto;min-width:96px}
+  .etapas{display:flex !important;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.etapas::-webkit-scrollbar{display:none}
+  .etapas a{flex:0 0 128px}
+  .subtabs{flex-wrap:nowrap !important;overflow-x:auto}.subtabs .st{white-space:nowrap;flex:0 0 auto}
+  .row{gap:6px}
+  iframe{min-height:520px !important}
+  table{min-width:0 !important;table-layout:auto !important}td input{max-width:100% !important;width:100% !important}
+  /* los menús desplegables (Filtrar, Perdido…) se abren como hoja abajo de la pantalla */
+  details[open]>form[style*="position:absolute"]{position:fixed !important;left:10px !important;right:10px !important;top:auto !important;bottom:10px !important;max-height:70vh;overflow:auto;z-index:50;min-width:0 !important}
+}
 .aviso{background:#FFF3D6;border-radius:12px;padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;gap:10px;align-items:center}
 .aviso.rojo{background:#FBE4E7}.mut{color:#5A6670;font-size:13px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 pre{white-space:pre-wrap;font:inherit;margin:0}
