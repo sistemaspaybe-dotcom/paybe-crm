@@ -82,7 +82,7 @@ module.exports = (app, { wrap, page }) => {
            (select max(creado) from mensajes m where m.caso_id=c.id and not m.entrante) ult_nuestro
          from casos c join personas p on p.id=c.persona_id
          where (c.fase='oportunidad' and c.etapa in ('le_intereso','falta_sena','sena_pagada'))
-            or (c.fase='venta' and c.etapa in ('reservando','saldo'))
+            or (c.fase='venta' and c.etapa in ('pedir_docs','docs','reservando','saldo'))
             or (c.fase='lead' and c.etapa='esperando' and c.actualizado < now() - interval '3 days')
          order by c.actualizado limit 30`),
       q(`select a.*, p.nombre, c.id caso from avisos a join casos c on c.id=a.caso_id join personas p on p.id=c.persona_id
@@ -157,6 +157,8 @@ module.exports = (app, { wrap, page }) => {
       if (c.etapa === 'le_intereso') { estado = '🎉 Dijo que sí: mandarle los datos de la seña'; boton = `<form method=post action=/caso/${c.id}/datos_sena><button class="p">Ya le mandé los datos</button></form>`; }
       else if (c.etapa === 'falta_sena') { const d = dias(c.datos_sena_en || c.actualizado); estado = `Falta la seña · le mandamos los datos hace ${d} d`; boton = `<a class="btn g" href="/caso/${c.id}">Llegó la seña</a>${d >= 3 ? `<a class="btn" href="/caso/${c.id}#chat">Preguntarle</a>` : ''}`; }
       else if (c.etapa === 'sena_pagada') { estado = 'Seña pagada: pasar a Venta y reservar'; boton = `<form method=post action=/caso/${c.id}/a_venta><button class="g">Pasar a Venta</button></form>`; }
+      else if (c.etapa === 'pedir_docs') { estado = '📄 Pedirles la documentación de los pasajeros'; boton = `<a class="btn p" href="/caso/${c.id}">Pedir documentación</a>`; }
+      else if (c.etapa === 'docs') { estado = '🗂️ Juntando los documentos de los pasajeros'; boton = `<a class="btn" href="/caso/${c.id}">Cargar documentos</a>`; }
       else if (c.etapa === 'reservando') { estado = 'Reservando'; boton = `<a class="btn" href="/caso/${c.id}">Ver reservas</a>`; }
       else if (c.etapa === 'saldo') { estado = `Falta el saldo${c.sale ? ' · viajan el ' + fecha(c.sale) : ''}`; boton = `<a class="btn g" href="/caso/${c.id}">Llegó el saldo</a>`; }
       else { estado = `Le mandamos la cotización hace ${dias(c.actualizado)} d y no contestó`; boton = `<a class="btn" href="/caso/${c.id}#chat">Hacer seguimiento</a>`; }

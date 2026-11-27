@@ -37,7 +37,7 @@ async function revisarSaldos() {
       exists (select 1 from actividad a where a.caso_id=c.id and a.texto like 'Saldo 2 meses%') hecho60,
       exists (select 1 from actividad a where a.caso_id=c.id and a.texto like 'Saldo 1 mes%') hecho30
     from casos c join personas p on p.id=c.persona_id
-    where c.fase='venta' and c.etapa in ('reservando','saldo') and c.sale is not null and c.sale - current_date <= 60 and c.sale >= current_date`);
+    where c.fase='venta' and c.etapa in ('pedir_docs','docs','reservando','saldo') and c.sale is not null and c.sale - current_date <= 60 and c.sale >= current_date`);
   for (const r of rs) {
     const v = { nombre: reglas.primerNombre(r.nombre), destino: r.destino || 'el viaje' };
     if (r.faltan <= 30 && !r.hecho30) {

@@ -2,7 +2,7 @@
 const crypto = require('crypto');
 const { q, one } = require('./db');
 const { FASES, BAJAS, MOTIVOS, ESTADOS_DESTINO, MEDIOS, accionesPara } = require('./flow');
-const { esc, fecha, usd, dinero } = require('./views');
+const { esc, fecha, fechaDia, usd, dinero } = require('./views');
 const ig = require('./instagram');
 const canales = require('./canales');
 const ia = require('./ia');
@@ -56,12 +56,14 @@ module.exports = function (app, { wrap, page, log, hace }) {
   app.get('/caso/:id', wrap(async (req, res) => {
     const c = await one('select c.*, p.nombre, p.whatsapp, p.mail, p.origen, p.instagram_user, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [req.params.id]);
     if (!c) return res.status(404).send('No existe');
-    const [acts, avisos, chats, pagos, comps, reservas, cots, msgs, ds, otras] = await Promise.all([
+    const [acts, avisos, chats, pagos, comps, pasajeros, reservas, cots, msgs, ds, otras] = await Promise.all([
       q('select * from actividad where caso_id=$1 order by creada desc limit 40', [c.id]),
       q('select * from avisos where caso_id=$1 and not hecho order by para', [c.id]),
       q('select * from chats where caso_id=$1 order by creado desc', [c.id]),
       q('select * from pagos where caso_id=$1 order by fecha', [c.id]),
       q('select id, pago_id, nombre from comprobantes where caso_id=$1 order by id', [c.id]),
+      q(`select p.id, p.nombre, p.nacimiento, p.documento, (select coalesce(json_agg(json_build_object('id',d.id,'tipo',d.tipo,'nombre',d.nombre,'vence',d.vence) order by d.id),'[]') from documentos d where d.persona_id=p.id) docs
+         from caso_pasajeros cp join personas p on p.id=cp.persona_id where cp.caso_id=$1 order by cp.creado`, [c.id]),
       q('select * from reservas where caso_id=$1 order by id', [c.id]),
       q('select * from cotizaciones where caso_id=$1 order by destino_id, version, id', [c.id]),
       q('select * from (select * from mensajes where caso_id=$1 order by creado desc limit 60) m order by creado', [c.id]),
@@ -69,6 +71,12 @@ module.exports = function (app, { wrap, page, log, hace }) {
       q(`select id, destino, fase, etapa from casos where persona_id=$1 and id<>$2 and fase<>'baja' and not (fase='venta' and etapa='fin') order by creado desc`, [c.persona_id, c.id]),
     ]);
     const ventana = await enVentana(c.id);
+    // al llegar a Reservando, la lista de lo que hay que reservar sale de la cotización aceptada (lo incluido)
+    if (c.fase === 'venta' && c.etapa === 'reservando' && !reservas.length) {
+      const k = cots.find(x => x.estado === 'aceptada');
+      for (const i of (k?.items || []).filter(i => (i.uso || 'incluido') === 'incluido' && i.item))
+        reservas.push(await one('insert into reservas(caso_id,servicio,proveedor,link) values($1,$2,$3,$4) returning *', [c.id, [i.item, i.detalle].filter(Boolean).join(' · '), i.proveedor || null, i.link || null]));
+    }
 
     // barra de etapas
     // barra de etapas (como el Path de Salesforce): tocar una etapa MUESTRA qué significa y qué pasó ahí, sin cambiarla.
@@ -83,7 +91,9 @@ module.exports = function (app, { wrap, page, log, hace }) {
       recotizar: 'Dijo que sí, pero cambió el precio: hay que cargar la tarifa nueva y mandarla.',
       convertido: 'Dijo que sí: pasa a Oportunidad. Se hace con "Dijo que sí" en "¿Qué contestó?", eligiendo la cotización.',
       le_intereso: 'Dijo que sí: hay que mandarle los datos para la seña.', falta_sena: 'Se le mandaron los datos y falta que pague la seña.', sena_pagada: 'Pagó la seña: pasar a Venta.',
-      reservando: 'Hay que reservar todo (aéreos, hoteles, traslados).', saldo: 'Falta que pague el saldo (hasta 30 días antes de salir).', previaje: 'Todo pago: documentación y detalles antes del viaje.', viaja: 'Están de viaje.', fin: 'Volvieron: mandar la encuesta y pedir la reseña.',
+      pedir_docs: 'Pasó a Venta: hay que pedirles los datos y la documentación de cada pasajero (un solo mensaje con todo).',
+      docs: 'Se les pidió la documentación: cargá cada pasajero y subí sus documentos a medida que llegan.',
+      reservando: 'Con los documentos listos, hay que reservar todo lo incluido (aéreos, hoteles, traslados) y anotar cada código.', saldo: 'Falta que pague el saldo (hasta 30 días antes de salir).', previaje: 'Todo pago: documentación y detalles antes del viaje.', viaja: 'Están de viaje.', fin: 'Volvieron: mandar la encuesta y pedir la reseña.',
     };
     const extraEtapa = k => {
       const li = xs => xs.length ? `<ul style="margin:8px 0 0;padding-left:18px">${xs.join('')}</ul>` : '';
@@ -214,6 +224,22 @@ module.exports = function (app, { wrap, page, log, hace }) {
       <span class=mut style="padding:2px 6px;font-size:12px">Cuenta en la conversión. Si no era una consulta, usá Filtrar.</span></form></details>` : '';
     const wa = c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : '';
     const sena = c.fase === 'oportunidad' && c.etapa !== 'le_intereso' ? (() => { const k = cots.find(x => x.estado === 'aceptada'); return k ? `<div class="card"><h2>Seña</h2><p>${esc(nombreDest(k.destino_id))} · v${k.version} · ${dinero(k.precio_pp, k.moneda)} por persona. Seña ${k.sena_pct ?? 50}%: <b>${dinero(plata(k.precio_pp * (k.sena_pct ?? 50) / 100), k.moneda)} por persona</b>${k.valida_hasta ? ` · tarifa válida hasta ${fecha(k.valida_hasta)}` : ''}.</p><p class=mut>${c.etapa === 'falta_sena' ? (c.sena_seguimiento_en ? 'Ya se le mandó el mensaje. Si no contesta en 3 días, pasa a Perdido.' : `Si en 3 días no llega la seña, se arma un solo mensaje para preguntarle si sigue${c.datos_sena_en ? ' (' + fecha(new Date(new Date(c.datos_sena_en).getTime() + 3 * 864e5)) + ')' : ''}.`) : 'Cuando le mandes los datos, tocá "Ya le mandé los datos de la seña".'}</p></div>` : ''; })() : '';
+    // pasajeros de la venta, cada uno es una persona con sus documentos (quedan guardados para el próximo viaje)
+    const DOC_TIPOS = ['Pasaporte', 'DNI', 'Visa', 'Certificado de vacunas', 'Partida de nacimiento', 'Autorización de viaje (menores)', 'Otro'];
+    const esperados = String(c.cuantos || '').match(/\d+/g)?.reduce((a, x) => a + Number(x), 0) || 0;
+    const tieneId = x => (x.docs || []).some(d => ['Pasaporte', 'DNI'].includes(d.tipo));
+    const faltanDocs = pasajeros.filter(x => !tieneId(x)).length + Math.max(0, esperados - pasajeros.length);
+    const yaEsTitular = pasajeros.some(x => x.id === c.persona_id);
+    const tarjetaPasajeros = c.fase !== 'venta' ? '' : `<div class="card" id=pasajeros><div class="row" style="justify-content:space-between"><h2 style="margin:0">🧳 Pasajeros y documentos</h2><span class="chip ${faltanDocs ? 'op' : 've'}">${pasajeros.length}${esperados ? ' de ' + esperados : ''} cargados${faltanDocs ? ' · faltan documentos' : ' · completo ✓'}</span></div>
+      ${pasajeros.map(x => `<div style="border:1px solid #F0E6E1;border-radius:12px;padding:12px 14px;margin-top:10px">
+        <div class="row" style="justify-content:space-between"><span><a href="/persona/${x.id}"><b>${esc(x.nombre)}</b></a> <span class=mut>${x.nacimiento ? '· nació el ' + fechaDia(x.nacimiento) : ''}${x.documento ? ' · doc. ' + esc(x.documento) : ''}</span></span>
+        <form method=post action=/caso/${c.id}/pasajero/${x.id}/quitar onsubmit="return confirm('¿Sacar a ${esc(x.nombre)} de este viaje? Sus documentos quedan guardados en la persona.')"><button style="padding:4px 10px;font-size:12px">Sacar del viaje</button></form></div>
+        <div class=row style="gap:6px;margin-top:8px;flex-wrap:wrap">${(x.docs || []).map(d => `<a class="chip ve" target=_blank rel=noopener href="/documento/${d.id}" title="${esc(d.nombre)}">📎 ${esc(d.tipo)}${d.vence ? ' · vence ' + fechaDia(d.vence) : ''}</a>`).join('')}${tieneId(x) ? '' : '<span class="chip op">Falta pasaporte o DNI</span>'}</div>
+        <form method=post action=/persona/${x.id}/documento class=row style="gap:6px;margin-top:8px;flex-wrap:wrap"><input type=hidden name=caso value=${c.id}><select name=tipo style="width:auto">${DOC_TIPOS.map(t => `<option>${t}</option>`).join('')}</select>${campoArchivo('')}<label style="margin:0;font-weight:400" class=mut>Vence <input type=date name=vence style="width:auto"></label><button onclick="if(!this.form.archivo_b64.value){alert('Elegí el archivo');return false}">Subir documento</button></form></div>`).join('')}
+      <form method=post action=/caso/${c.id}/pasajero class="f" style="margin-top:12px;border-top:1px solid #F0E6E1;padding-top:12px"><div><label>Nombre y apellido (como en el pasaporte)</label><input name=nombre required></div><div><label>Fecha de nacimiento</label><input type=date name=nacimiento></div><div><label>N° de pasaporte o DNI</label><input name=documento></div><div style="align-self:end"><button class="p">+ Agregar pasajero</button></div></form>
+      ${yaEsTitular ? '' : `<form method=post action=/caso/${c.id}/pasajero style="margin-top:6px"><input type=hidden name=titular value=1><button>+ ${esc(c.nombre)} también viaja</button></form>`}
+      <p class=mut style="margin-top:8px;font-size:13px">Cada pasajero queda guardado como persona con sus documentos, así en el próximo viaje ya están.</p></div>`;
+
     // el próximo paso, bien a la vista: qué hay que hacer en esta etapa y el botón para hacerlo
     let proximo = '';
     const kAcept = cots.find(x => x.estado === 'aceptada');
@@ -229,6 +255,27 @@ module.exports = function (app, { wrap, page, log, hace }) {
         <div class=row style="margin-top:8px;gap:8px">${enviarPor}<button type=button onclick="navigator.clipboard.writeText(document.getElementById('msg_sena').value);this.textContent='Copiado ✓'">Copiar mensaje</button>${c.whatsapp ? `<a class=btn target=_blank rel=noopener href="https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}?text=" onclick="this.href='https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}?text='+encodeURIComponent(document.getElementById('msg_sena').value)">Abrir WhatsApp con el mensaje ↗</a>` : ''}
         <button class="${enviarPor ? '' : 'p'}">Ya le mandé los datos → Falta la seña</button></div>
         <p class=mut style="margin-top:6px">Si en 3 días no llega la seña, se arma solo un mensaje para preguntarle si sigue.</p></form></div>`;
+    } else if (c.fase === 'venta' && c.etapa === 'pedir_docs') {
+      const M = await reglas.mensajes();
+      const texto = reglas.completar(M.pedir_docs, { nombre: reglas.primerNombre(c.nombre), destino: ds.find(d => d.estado === 'eligio')?.nombre || c.destino || 'el viaje' });
+      proximo = `<div class="card" style="border:2px solid var(--verde)"><div class="row" style="justify-content:space-between"><h2 style="margin:0">👉 Próximo paso: pedirles la documentación</h2><span class="chip ve">Pedir documentación</span></div>
+        <p style="margin-top:8px">Un solo mensaje con todo lo que necesitamos de cada pasajero${esperados ? ` (viajan ${esperados})` : ''}. Lo podés editar antes de mandarlo; el texto base se cambia en Ajustes → Mensajes.</p>
+        <form method=post action=/caso/${c.id}/docs_pedidos style="margin-top:10px"><textarea name=texto id=msg_docs rows=10>${esc(texto)}</textarea>
+        <div class=row style="margin-top:8px;gap:8px">${chat?.puede ? `<button class="p" name=enviar value=1>Mandar por ${chat.nombre} → Junta de documentos</button>` : ''}<button type=button onclick="navigator.clipboard.writeText(document.getElementById('msg_docs').value);this.textContent='Copiado ✓'">Copiar mensaje</button>${c.whatsapp ? `<a class=btn target=_blank rel=noopener href="#" onclick="this.href='https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}?text='+encodeURIComponent(document.getElementById('msg_docs').value)">Abrir WhatsApp con el mensaje ↗</a>` : ''}
+        <button class="${chat?.puede ? '' : 'p'}">Ya se la pedí → Junta de documentos</button></div></form></div>`;
+    } else if (c.fase === 'venta' && c.etapa === 'docs') {
+      proximo = `<div class="card" style="border:2px solid var(--verde)"><div class="row" style="justify-content:space-between"><h2 style="margin:0">👉 Próximo paso: juntar los documentos</h2><span class="chip ve">Junta de documentos</span></div>
+        <p style="margin:8px 0 10px">Cargá cada pasajero abajo y subí su pasaporte o DNI (y lo que haga falta) a medida que llegan.${faltanDocs ? ` <b style="color:#B84A53">Falta${faltanDocs > 1 ? 'n' : ''} ${faltanDocs} pasajero${faltanDocs > 1 ? 's' : ''} con documento.</b>` : ' <b style="color:var(--verde)">✓ Están todos.</b>'}</p>
+        <div class="row">${acc}</div>${faltanDocs ? '<p class=mut style="margin-top:6px;font-size:13px">Podés pasar igual a Reservando si ya tenés lo necesario para reservar.</p>' : ''}</div>`;
+    } else if (c.fase === 'venta' && c.etapa === 'reservando') {
+      const hechas = reservas.filter(r => r.estado === 'confirmada').length, todas = reservas.length && hechas === reservas.length;
+      proximo = `<div class="card" id=reservar style="border:2px solid var(--verde)"><div class="row" style="justify-content:space-between"><h2 style="margin:0">👉 Próximo paso: reservar todo</h2><span class="chip ${todas ? 've' : 'op'}">${hechas} de ${reservas.length} reservado${reservas.length === 1 ? '' : 's'}</span></div>
+        <p style="margin:8px 0 4px">Sale de lo incluido en la cotización aceptada. Reservá cada cosa con su proveedor, anotá el código y marcala.</p>
+        ${reservas.map(r => `<form method=post action=/reserva/${r.id}/toggle class=row style="justify-content:space-between;gap:8px;padding:10px 12px;border:1px solid ${r.estado === 'confirmada' ? '#BFDCC9' : '#F0E6E1'};background:${r.estado === 'confirmada' ? '#F3FAF5' : '#fff'};border-radius:10px;margin-top:6px">
+          <span><b>${r.estado === 'confirmada' ? '✓ ' : ''}${esc(r.servicio)}</b>${r.proveedor ? ` <span class=mut>· ${esc(r.proveedor)}</span>` : ''}${/^https?:/.test(r.link || '') ? ` <a href="${esc(r.link)}" target=_blank rel=noopener>↗</a>` : ''}${r.codigo && r.estado === 'confirmada' ? ` <span class="chip ve">Código ${esc(r.codigo)}</span>` : ''}</span>
+          <span class=row style="gap:6px">${r.estado === 'confirmada' ? `<button style="font-size:12px;padding:4px 10px">Desmarcar</button>` : `<input name=codigo placeholder="Código / localizador" style="width:180px"><button class="g">Reservado ✓</button>`}</span></form>`).join('')}
+        <form method=post action=/caso/${c.id}/reserva class=row style="gap:6px;margin-top:8px"><input name=servicio placeholder="Agregar algo más para reservar (ej. seguro, excursión)" required style="flex:1"><button>+ Agregar</button></form>
+        <div class=row style="margin-top:12px;gap:8px;align-items:center">${acc.replace('class="g"', todas ? 'class="p"' : 'class=""')}${todas ? '' : '<span class=mut>Cuando esté todo reservado, pasá a Saldo.</span>'}</div></div>`;
     } else if (acc) {
       proximo = `<div class="card" style="border:2px solid var(--verde)"><h2 style="margin:0">👉 Próximo paso</h2><p style="margin:6px 0 10px">${esc(GUIA[c.etapa] || '')}</p><div class="row">${acc}</div></div>`;
     }
@@ -241,7 +288,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const faltaSalida = c.fase === 'venta' && !c.sale && ['reservando', 'saldo'].includes(c.etapa) ? '<div class="aviso">Cargá la fecha de salida (abajo, en "Sale") para que lleguen solos los avisos del saldo, 2 meses y 1 mes antes.</div>' : '';
     const recotizando = c.fase === 'lead' && c.etapa === 'recotizar' ? '<div class="aviso">↻ Confirmó, pero cambió el precio: cargá la tarifa nueva en el cotizador y la fecha de validez, y mandala.</div>' : '';
 
-    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}${subtabs(c, ds, cots, 'ficha')}${proximo}
+    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}${subtabs(c, ds, cots, 'ficha')}${proximo}${tarjetaPasajeros}
     ${otras.length ? `<div class="aviso">Esta persona tiene ${otras.length} consulta${otras.length > 1 ? 's' : ''} más abierta${otras.length > 1 ? 's' : ''}: ${otras.map(o => `<a href="/caso/${o.id}">${esc(o.destino || 'consulta')} (${esc(FASES[o.fase].etapas[o.etapa] || o.etapa)})</a>`).join(', ')}</div>` : ''}
     ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
@@ -644,6 +691,40 @@ module.exports = function (app, { wrap, page, log, hace }) {
   }));
 
   // ---------- comprobante de pago ----------
+  // pasajeros: personas que viajan en esta venta
+  app.post('/caso/:id/pasajero', wrap(async (req, res) => {
+    const c = await one('select * from casos where id=$1', [req.params.id]); if (!c) return res.status(404).send('No existe');
+    let pid = c.persona_id;
+    if (!req.body.titular) {
+      const nombre = String(req.body.nombre || '').trim(); if (!nombre) return res.redirect('/caso/' + c.id + '#pasajeros');
+      pid = (await one(`insert into personas(nombre, origen, nacimiento, documento, notas) values($1,'Pasajero',$2,$3,$4) returning id`, [nombre, n2(req.body.nacimiento), n2(String(req.body.documento || '').trim()), `Viaja en la consulta ${c.id}`])).id;
+    }
+    await q('insert into caso_pasajeros(caso_id, persona_id) values($1,$2) on conflict do nothing', [c.id, pid]);
+    await log(c.id, req.session.quien, 'Pasajero agregado: ' + (await one('select nombre from personas where id=$1', [pid])).nombre + '.');
+    res.redirect('/caso/' + c.id + '#pasajeros');
+  }));
+  app.post('/caso/:id/pasajero/:pid/quitar', wrap(async (req, res) => {
+    await q('delete from caso_pasajeros where caso_id=$1 and persona_id=$2', [req.params.id, req.params.pid]);
+    res.redirect('/caso/' + req.params.id + '#pasajeros');
+  }));
+  // documentos de una persona (pasaporte, DNI, visa...)
+  app.post('/persona/:id/documento', wrap(async (req, res) => {
+    const b = req.body, volver = b.caso ? '/caso/' + Number(b.caso) + '#pasajeros' : '/persona/' + req.params.id;
+    if (!b.archivo_b64) return res.redirect(volver);
+    await q('insert into documentos(persona_id,caso_id,tipo,nombre,mime,datos,vence) values($1,$2,$3,$4,$5,$6,$7)', [req.params.id, n2(b.caso), String(b.tipo || 'Otro').slice(0, 60), String(b.archivo_nombre || 'documento').slice(0, 200), String(b.archivo_tipo || 'application/octet-stream').slice(0, 100), Buffer.from(String(b.archivo_b64), 'base64'), n2(b.vence)]);
+    if (b.caso) { const p = await one('select nombre from personas where id=$1', [req.params.id]); await log(Number(b.caso), req.session.quien, `Documento subido: ${b.tipo} de ${p?.nombre}.`); }
+    res.redirect(volver);
+  }));
+  app.get('/documento/:id', wrap(async (req, res) => {
+    const a = await one('select * from documentos where id=$1', [req.params.id]); if (!a) return res.status(404).send('No existe');
+    res.set('Content-Type', a.mime).set('Content-Disposition', `inline; filename="${encodeURIComponent(a.nombre)}"`).send(a.datos);
+  }));
+  app.post('/documento/:id/borrar', wrap(async (req, res) => {
+    const a = await one('delete from documentos where id=$1 returning persona_id', [req.params.id]);
+    res.redirect(a ? '/persona/' + a.persona_id : '/');
+  }));
+  app.locals.campoArchivo = campoArchivo;
+
   app.get('/comprobante/:id', wrap(async (req, res) => {
     const a = await one('select * from comprobantes where id=$1', [req.params.id]); if (!a) return res.status(404).send('No existe');
     res.set('Content-Type', a.tipo).set('Content-Disposition', `inline; filename="${encodeURIComponent(a.nombre)}"`).send(a.datos);

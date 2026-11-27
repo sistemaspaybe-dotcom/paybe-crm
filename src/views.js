@@ -32,4 +32,6 @@ ${process.env.STAGING === 'true' ? '<div style="background:#8A5A00;color:#fff;te
 <main>${body}</main></body></html>`;
 }
 const chipFase = f => `<span class="chip ${{ oportunidad: 'op', venta: 've', baja: 'ba' }[f] || ''}">`;
-module.exports = { esc, fecha, usd, dinero, layout, chipFase };
+// fecha de un campo "date" (nacimiento, vencimiento): sin corrimiento de zona horaria y con año
+const fechaDia = d => d ? new Date(String(d.toISOString?.().slice(0, 10) || d).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
+module.exports = { esc, fecha, fechaDia, usd, dinero, layout, chipFase };

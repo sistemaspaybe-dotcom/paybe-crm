@@ -6,7 +6,7 @@ const { FASES, ACCIONES, BAJAS, MOTIVOS, PIDE_COMPROBANTE, MEDIOS, accionesPara 
 const reglas = require('./src/reglas');
 const despues = require('./src/despues');
 const ia = require('./src/ia');
-const { esc, fecha, usd, dinero, layout, chipFase } = require('./src/views');
+const { esc, fecha, fechaDia, usd, dinero, layout, chipFase } = require('./src/views');
 const ig = require('./src/instagram');
 const conv = require('./src/conversaciones');
 const wa = require('./src/whatsapp');
@@ -103,9 +103,12 @@ app.post('/caso/:id/baja', wrap(async (req, res) => {
   await q(`update destinos set estado='descartado' where caso_id=$1 and estado not in ('eligio','no_eligio','descartado')`, [c.id]);
   await log(c.id, req.session.quien, `Perdido (${FASES[c.fase].nombre}): ${req.body.motivo}.`); res.redirect('/caso/' + c.id);
 }));
-app.post('/caso/:id/reserva', wrap(async (req, res) => { await q('insert into reservas(caso_id,servicio) values($1,$2)', [req.params.id, req.body.servicio]); res.redirect('/caso/' + req.params.id); }));
+app.post('/caso/:id/reserva', wrap(async (req, res) => { await q('insert into reservas(caso_id,servicio) values($1,$2)', [req.params.id, req.body.servicio]); res.redirect('/caso/' + req.params.id + '#reservar'); }));
 app.post('/reserva/:id/toggle', wrap(async (req, res) => {
-  const r = await one(`update reservas set estado=case when estado='confirmada' then 'pendiente' else 'confirmada' end where id=$1 returning caso_id`, [req.params.id]); res.redirect('/caso/' + r.caso_id);
+  const cod = String(req.body.codigo || '').trim();
+  const r = await one(`update reservas set estado=case when estado='confirmada' then 'pendiente' else 'confirmada' end, codigo=coalesce(nullif($2,''), codigo), reservada_en=case when estado='confirmada' then null else now() end where id=$1 returning *`, [req.params.id, cod]);
+  if (r.estado === 'confirmada') await log(r.caso_id, req.session.quien, `Reservado: ${r.servicio}${r.codigo ? ' (código ' + r.codigo + ')' : ''}.`);
+  res.redirect('/caso/' + r.caso_id + '#reservar');
 }));
 require('./src/rutas')(app, { wrap, page, log, hace });
 // acciones de etapa
@@ -113,9 +116,9 @@ app.post('/caso/:id/:accion', wrap(async (req, res, next) => {
   const a = ACCIONES[req.params.accion]; if (!a) return next();
   const c = await one('select * from casos where id=$1', [req.params.id]);
   if (!c || `${c.fase}.${c.etapa}` !== a.desde) return res.redirect('/caso/' + req.params.id);
-  if (req.params.accion === 'datos_sena' && req.body.enviar) { // mandarlo desde el CRM por el chat del cliente
+  if (a.mensaje && req.body.enviar) { // mandarlo desde el CRM por el chat del cliente
     try { await require('./src/canales').enviar(c.id, String(req.body.texto || '').trim()); }
-    catch (e) { await log(c.id, 'CRM', 'No se pudieron mandar los datos de la seña: ' + e.message); return res.redirect('/caso/' + c.id); }
+    catch (e) { await log(c.id, 'CRM', 'No se pudo mandar el mensaje: ' + e.message); return res.redirect('/caso/' + c.id); }
   }
   await q('update casos set fase=$1, etapa=$2, actualizado=now() where id=$3', [...a.a, c.id]);
   await log(c.id, req.session.quien, a.log);
@@ -149,11 +152,16 @@ app.get('/personas', wrap(async (req, res) => {
 app.get('/persona/:id', wrap(async (req, res) => {
   const p = await one('select * from personas where id=$1', [req.params.id]); if (!p) return res.status(404).send('No existe');
   const cs = await q('select * from casos where persona_id=$1 order by creado desc', [p.id]);
+  const docs = await q('select id, tipo, nombre, vence, creado from documentos where persona_id=$1 order by id', [p.id]);
+  const viajes = await q('select c.id, c.destino, c.fase, c.etapa, t.nombre titular from caso_pasajeros cp join casos c on c.id=cp.caso_id join personas t on t.id=c.persona_id where cp.persona_id=$1 order by c.creado desc', [p.id]);
   page(req, res, p.nombre, `<h1>${esc(p.nombre)}</h1>${p.instagram_user ? `<p><a target=_blank href="https://www.instagram.com/${encodeURIComponent(p.instagram_user)}/">Instagram: @${esc(p.instagram_user)}</a></p>` : ''}<div class="card"><form method=post action=/persona/${p.id} class="f"><div><label>Nombre</label><input name=nombre value="${esc(p.nombre)}"></div><div><label>WhatsApp</label><input name=whatsapp value="${esc(p.whatsapp)}"></div><div><label>Mail</label><input name=mail value="${esc(p.mail)}"></div>
-  <div style="grid-column:1/-1"><label>Lo que sabemos (gustos, documentos, con quién viaja)</label><textarea name=notas rows=4>${esc(p.notas)}</textarea></div><div><button class="p">Guardar</button></div></form></div>
+  <div><label>Fecha de nacimiento</label><input type=date name=nacimiento value="${p.nacimiento ? new Date(p.nacimiento).toISOString().slice(0, 10) : ''}"></div><div><label>N° de pasaporte o DNI</label><input name=documento value="${esc(p.documento)}"></div><div style="grid-column:1/-1"><label>Lo que sabemos (gustos, documentos, con quién viaja)</label><textarea name=notas rows=4>${esc(p.notas)}</textarea></div><div><button class="p">Guardar</button></div></form></div>
+  <div class="card"><h2>Documentos</h2>${docs.length ? `<table>${docs.map(d => `<tr><td><a target=_blank rel=noopener href="/documento/${d.id}">📎 ${esc(d.tipo)}</a> <span class=mut>${esc(d.nombre)}</span></td><td class=mut>${d.vence ? 'vence ' + fechaDia(d.vence) : ''}</td><td class=mut>subido ${fecha(d.creado)}</td><td><form method=post action=/documento/${d.id}/borrar onsubmit="return confirm('¿Borrar este documento?')"><button style="padding:4px 10px;font-size:12px">Borrar</button></form></td></tr>`).join('')}</table>` : '<p class=mut>Todavía no tiene documentos.</p>'}
+  <form method=post action=/persona/${p.id}/documento class=row style="gap:6px;margin-top:10px;flex-wrap:wrap"><select name=tipo style="width:auto">${['Pasaporte', 'DNI', 'Visa', 'Certificado de vacunas', 'Partida de nacimiento', 'Autorización de viaje (menores)', 'Otro'].map(t => `<option>${t}</option>`).join('')}</select>${app.locals.campoArchivo('')}<label style="margin:0;font-weight:400" class=mut>Vence <input type=date name=vence style="width:auto"></label><button onclick="if(!this.form.archivo_b64.value){alert('Elegí el archivo');return false}">Subir documento</button></form></div>
+  ${viajes.length ? `<div class="card"><h2>Viajes como pasajero</h2><table>${viajes.map(c => `<tr><td><a href="/caso/${c.id}">${esc(c.destino || 'Viaje')}</a></td><td class=mut>${esc(c.titular)}</td><td>${esc(FASES[c.fase].etapas[c.etapa] || c.etapa)}</td></tr>`).join('')}</table></div>` : ''}
   <div class="card"><h2>Consultas</h2><table>${cs.map(c => `<tr><td><a href="/caso/${c.id}">${esc(c.destino || c.servicio || 'Consulta')}</a></td><td>${chipFase(c.fase)}${FASES[c.fase].nombre} · ${esc(FASES[c.fase].etapas[c.etapa])}</span></td><td class=mut>${fecha(c.creado)}</td></tr>`).join('')}</table></div>`, '/personas');
 }));
-app.post('/persona/:id', wrap(async (req, res) => { const b = req.body; await q('update personas set nombre=$1,whatsapp=$2,mail=$3,notas=$4 where id=$5', [b.nombre, b.whatsapp, b.mail, b.notas, req.params.id]); res.redirect('/persona/' + req.params.id); }));
+app.post('/persona/:id', wrap(async (req, res) => { const b = req.body; await q('update personas set nombre=$1,whatsapp=$2,mail=$3,notas=$4,nacimiento=$5,documento=$6 where id=$7', [b.nombre, b.whatsapp, b.mail, b.notas, b.nacimiento || null, b.documento || null, req.params.id]); res.redirect('/persona/' + req.params.id); }));
 
 // ---- cotizaciones ----
 app.get('/cotizaciones', wrap(async (req, res) => {
