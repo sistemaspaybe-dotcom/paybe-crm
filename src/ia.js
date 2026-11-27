@@ -108,6 +108,13 @@ ${hilo}
     return;
   }
 
+  // escribió algo pero sin decir qué viaje busca (ni destino ni servicio): se le manda el saludo armado con lo que hace Paybe
+  const sinViaje = !(Array.isArray(d.destinos) && d.destinos.some(x => txt(x?.nombre))) && !destinosAntes.length && !(Array.isArray(d.tipos) && d.tipos.length);
+  if (sinViaje && c.etapa === 'nuevo' && !await one('select 1 from mensajes where caso_id=$1 and not entrante limit 1', [c.id])) {
+    await require('./conversaciones').saludar(c.id);
+    return;
+  }
+
   // lo común, en la consulta
   const tipos = (Array.isArray(d.tipos) ? d.tipos : [d.tipo]).filter(t => Object.keys(R.preguntas).includes(t));
   const tipo = tipos.length ? [...new Set([...reglas.serviciosDe(c), ...tipos])].join(', ') : null;

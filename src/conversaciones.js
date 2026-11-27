@@ -36,7 +36,7 @@ function esRuido(texto) {
 
 // ¿escribió solo un saludo? ("Hola!", "Buenas tardes", "hola, ¿cómo estás?") → se le contesta solo con el saludo armado
 const PALABRAS_SALUDO = new Set(['hola', 'holis', 'holi', 'buenas', 'buen', 'buenos', 'buena', 'dia', 'dias', 'tardes', 'noches', 'que', 'tal', 'como', 'estas', 'esta', 'va', 'hey', 'hi', 'hello', 'saludos', 'todo', 'bien']);
-const ABRE_SALUDO = /^(hol[aiy]s?|buen[oa]?s?|hey|hi|hello|saludos)$/;
+const ABRE_SALUDO = /^(hol[aiy]?s?|buen[oa]?s?|hey|hi|hello|saludos)$/; // "Hol" (cortado) también cuenta
 function esSaludo(texto) {
   const t = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ').replace(/(.)\1+/g, '$1').trim();
   const w = t.split(/\s+/).filter(Boolean);
