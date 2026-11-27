@@ -49,6 +49,20 @@ label{font-size:12px;font-weight:600;color:#5A6670;display:block;margin-bottom:3
   .etapas a small{display:none !important}
   .etapa-desc{display:block !important;font-size:13px;color:#5A6670;margin:6px 0 2px}
   .segm{display:flex !important;width:100%}.segm a{flex:1;text-align:center;padding:8px 6px !important;font-size:13px}
+  /* Leads/Oportunidades/Ventas: cada lead como una fila de bandeja de chats, compacta */
+  table.lista tr{display:grid !important;grid-template-columns:24px minmax(0,1fr) auto;grid-template-areas:"canal persona etapa" ". msg msg" ". que acc";column-gap:8px;row-gap:2px;padding:10px 0 !important}
+  table.lista tr:has(> th){display:none !important}
+  table.lista td{padding:0 !important;min-width:0}
+  table.lista td:nth-child(1){grid-area:canal;display:block !important}table.lista td:nth-child(1) div{display:none}
+  table.lista td:nth-child(1) svg{width:22px;height:22px}
+  table.lista td:nth-child(2){grid-area:persona}table.lista td:nth-child(2)>div{display:inline;margin:0 0 0 4px !important}
+  table.lista td:nth-child(3){grid-area:msg;font-size:14px;color:#4A5A66}
+  table.lista td:nth-child(3) .mut{display:none}table.lista td:nth-child(3) a>span:last-child{-webkit-line-clamp:1 !important}
+  table.lista td:nth-child(4){grid-area:que;font-size:13px;min-width:0 !important}table.lista td:nth-child(4)>div{display:none}table.lista td:nth-child(4)>span{white-space:nowrap}
+  table.lista td:nth-child(5){grid-area:etapa;text-align:right}table.lista td:nth-child(5) .chip{font-size:11px;padding:2px 8px}
+  table.lista td:nth-child(6){display:none !important}
+  table.lista td:nth-child(7){grid-area:acc;align-self:center}table.lista td:nth-child(7)>div{display:flex !important;gap:4px}
+  table.lista td:nth-child(7) button,table.lista td:nth-child(7) summary{padding:3px 10px !important;font-size:12px !important}
   /* filas de las listas: el canal chiquito arriba, en línea */
   td:first-child svg{width:20px;height:20px}
   td:first-child[title]{display:flex !important;gap:6px;align-items:center;text-align:left !important;width:auto}
