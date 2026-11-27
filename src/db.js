@@ -96,6 +96,8 @@ alter table reservas add column if not exists proveedor text;
 alter table reservas add column if not exists link text;
 alter table reservas add column if not exists codigo text;
 alter table reservas add column if not exists reservada_en timestamptz;
+alter table casos add column if not exists sugerencia text;
+alter table casos add column if not exists sugerencia_por text;
 create table if not exists caso_pasajeros (caso_id int, persona_id int, creado timestamptz default now(), primary key (caso_id, persona_id));
 create table if not exists documentos (id serial primary key, persona_id int, caso_id int, tipo text, nombre text, mime text, datos bytea, vence date, creado timestamptz default now());
 create table if not exists comprobantes (id serial primary key, caso_id int, pago_id int, nombre text, tipo text, datos bytea, creado timestamptz default now());
