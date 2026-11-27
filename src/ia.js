@@ -17,14 +17,16 @@ function programar(casoId) {
   pendientes.set(casoId, setTimeout(() => { pendientes.delete(casoId); enCola(() => analizar(casoId), casoId); }, Number(process.env.IA_ESPERA_MS) || 4000));
 }
 
-async function preguntarIA(pedido, maxTokens = 1200) {
+async function preguntarIA(pedido, maxTokens = 3000) {
   const r = await fetch((process.env.AI_API || 'https://api.anthropic.com') + '/v1/messages', {
     method: 'POST', headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model: process.env.AI_MODEL || 'claude-haiku-5-5', max_tokens: maxTokens, messages: [{ role: 'user', content: pedido }] }),
   }).then(r => r.json());
   if (r.error) throw new Error((r.error.type ? r.error.type + ': ' : '') + (r.error.message || 'error de la IA'));
-  const t = r.content?.[0]?.text || '';
-  try { return JSON.parse(t.match(/\{[\s\S]*\}/)?.[0]); } catch { return null; }
+  // la respuesta puede traer varios bloques (por ejemplo, de razonamiento): se juntan solo los de texto
+  const t = (r.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
+  try { return JSON.parse(t.match(/\{[\s\S]*\}/)?.[0]); }
+  catch { throw new Error(`respuesta sin JSON (corte: ${r.stop_reason || '?'}, bloques: ${(r.content || []).map(b => b.type).join(',') || 'ninguno'}): ${t.slice(0, 120)}`); }
 }
 
 const txt = v => (typeof v === 'string' || typeof v === 'number') && String(v).trim() && !/^(null|undefined|n\/a)$/i.test(String(v).trim()) ? String(v).trim().slice(0, 200) : null;
