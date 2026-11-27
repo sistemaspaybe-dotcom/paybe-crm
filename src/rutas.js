@@ -225,6 +225,12 @@ module.exports = function (app, { wrap, page, log, hace }) {
     } else if (acc) {
       proximo = `<div class="card" style="border:2px solid var(--verde)"><h2 style="margin:0">👉 Próximo paso</h2><p style="margin:6px 0 10px">${esc(GUIA[c.etapa] || '')}</p><div class="row">${acc}</div></div>`;
     }
+    if (proximo && c.fase === 'oportunidad' && ['le_intereso', 'falta_sena'].includes(c.etapa)) {
+      const MOT_SENA = ['No transfirió la seña', 'No contestó más', 'Lo compró en otro lado', 'Precio', 'Cambió de planes / fechas', 'Otro'];
+      proximo = proximo.replace(/<\/div>$/, `<details style="margin-top:12px;border-top:1px solid #F0E6E1;padding-top:10px"><summary style="cursor:pointer;color:#B84A53;font-weight:700">✕ Al final no transfiere / se bajó</summary>
+        <form method=post action=/caso/${c.id}/baja class=row style="margin-top:8px;gap:8px;flex-wrap:wrap"><span class=mut>¿Por qué?</span>${MOT_SENA.map(m => `<button name=motivo value="${esc(m)}">${esc(m)}</button>`).join('')}</form>
+        <p class=mut style="margin-top:6px;font-size:13px">Pasa a Perdido y cuenta en la conversión como oportunidad perdida.</p></details></div>`);
+    }
     const faltaSalida = c.fase === 'venta' && !c.sale && ['reservando', 'saldo'].includes(c.etapa) ? '<div class="aviso">Cargá la fecha de salida (abajo, en "Sale") para que lleguen solos los avisos del saldo, 2 meses y 1 mes antes.</div>' : '';
     const recotizando = c.fase === 'lead' && c.etapa === 'recotizar' ? '<div class="aviso">↻ Confirmó, pero cambió el precio: cargá la tarifa nueva en el cotizador y la fecha de validez, y mandala.</div>' : '';
 
