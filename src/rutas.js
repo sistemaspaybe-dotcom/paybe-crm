@@ -9,6 +9,11 @@ const ia = require('./ia');
 const reglas = require('./reglas');
 const demo = require('./demo');
 
+const campoArchivo = (txt = 'Comprobante (PDF o foto)') => `<label style="display:inline-flex;gap:6px;align-items:center;margin:0;font-weight:400"><span class=mut>${txt}</span><input type=file accept="application/pdf,image/*" style="max-width:240px" onchange="const f=this.files[0],fm=this.form;if(!f)return;if(f.size>10e6){alert('El archivo pesa más de 10 MB');this.value='';return}const r=new FileReader();r.onload=()=>{fm.archivo_b64.value=String(r.result).split(',')[1];fm.archivo_nombre.value=f.name;fm.archivo_tipo.value=f.type||'application/octet-stream'};r.readAsDataURL(f)"></label><input type=hidden name=archivo_b64><input type=hidden name=archivo_nombre><input type=hidden name=archivo_tipo>`;
+const guardarArchivo = async (casoId, pagoId, b) => {
+  if (!b.archivo_b64) return null;
+  return one('insert into comprobantes(caso_id,pago_id,nombre,tipo,datos) values($1,$2,$3,$4,$5) returning id', [casoId, pagoId, String(b.archivo_nombre || 'comprobante').slice(0, 200), String(b.archivo_tipo || 'application/octet-stream').slice(0, 100), Buffer.from(String(b.archivo_b64), 'base64')]);
+};
 const SEM = { verde: ['🟢', 'Para cotizar', '#E0F0E6', '#1E5A3A'], amarillo: ['🟡', 'Tibio', '#FFF3D6', '#8A5A00'], rojo: ['🔴', 'No cotizar', '#FBE4E7', '#B84A53'] };
 const n2 = v => v === '' || v == null ? null : v;
 const plata = v => Math.round(Number(v) || 0);
@@ -45,16 +50,18 @@ const barraLinks = c => {
 };
 
 module.exports = function (app, { wrap, page, log, hace }) {
+  app.locals.guardarArchivo = guardarArchivo;
 
   // ---------- la ficha ----------
   app.get('/caso/:id', wrap(async (req, res) => {
     const c = await one('select c.*, p.nombre, p.whatsapp, p.mail, p.origen, p.instagram_user, p.instagram_id from casos c join personas p on p.id=c.persona_id where c.id=$1', [req.params.id]);
     if (!c) return res.status(404).send('No existe');
-    const [acts, avisos, chats, pagos, reservas, cots, msgs, ds, otras] = await Promise.all([
+    const [acts, avisos, chats, pagos, comps, reservas, cots, msgs, ds, otras] = await Promise.all([
       q('select * from actividad where caso_id=$1 order by creada desc limit 40', [c.id]),
       q('select * from avisos where caso_id=$1 and not hecho order by para', [c.id]),
       q('select * from chats where caso_id=$1 order by creado desc', [c.id]),
       q('select * from pagos where caso_id=$1 order by fecha', [c.id]),
+      q('select id, pago_id, nombre from comprobantes where caso_id=$1 order by id', [c.id]),
       q('select * from reservas where caso_id=$1 order by id', [c.id]),
       q('select * from cotizaciones where caso_id=$1 order by destino_id, version, id', [c.id]),
       q('select * from (select * from mensajes where caso_id=$1 order by creado desc limit 60) m order by creado', [c.id]),
@@ -198,7 +205,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
       ${chat?.puede ? `<form method=post action=/caso/${c.id}/responder style="margin-top:10px"><textarea name=texto rows=2 placeholder="Escribí la respuesta" required></textarea><p><button class="p">Enviar por ${chat.nombre}</button></p></form>` : chat && !chat.ventana ? `<p class=mut style="margin-top:8px">Pasaron más de 24 h desde su último mensaje: ${chat.nombre} no deja contestar desde el CRM. Contestá desde la app.</p>` : ''}
       <div class="row" style="margin-top:8px">${ia.hayIA() && c.fase === 'lead' ? `<form method=post action=/caso/${c.id}/leer><button>Leer el chat de nuevo con la IA</button></form>` : ''}</div></div>` : '';
 
-    const acc = accionesPara(c).map(a => `<form method=post action=/caso/${c.id}/${a.k}>${a.pago ? `<input name=monto placeholder="Monto" inputmode=decimal style="width:120px"> <select name=moneda style="width:90px"><option>USD</option><option>ARS</option></select> <select name=medio style="width:190px">${MEDIOS.map(m => `<option>${m}</option>`).join('')}</select> ` : ''}<button class="g">${esc(a.label)}</button></form>`).join('');
+    const acc = accionesPara(c).map(a => `<form method=post action=/caso/${c.id}/${a.k}>${a.pago ? `<input name=monto placeholder="Monto" inputmode=decimal style="width:120px"> <select name=moneda style="width:90px"><option>USD</option><option>ARS</option></select> <select name=medio style="width:190px">${MEDIOS.map(m => `<option>${m}</option>`).join('')}</select> ${campoArchivo()} ` : ''}<button class="g">${esc(a.label)}</button></form>`).join('');
     // Perdido: arriba, al lado de Filtrar, con el motivo
     const baja = BAJAS[c.fase] ? `<details style="position:relative"><summary class="btn" style="list-style:none;cursor:pointer">Perdido ▾</summary>
       <form method=post action=/caso/${c.id}/baja style="position:absolute;right:0;top:calc(100% + 6px);z-index:5;background:#fff;border:1px solid var(--linea);border-radius:12px;padding:8px;display:grid;gap:6px;min-width:260px;box-shadow:0 6px 20px rgba(31,58,77,.12)">
@@ -252,7 +259,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     <div style="grid-column:1/-1"><button class="p">Guardar</button></div></form></div>
     <div class="card"><h2>Recordame</h2><form method=post action=/caso/${c.id}/aviso class="f" style="margin-top:8px"><div><label>Cuándo</label><input type=date name=para required value="${new Date(Date.now() + 864e5 * 2).toISOString().slice(0, 10)}"></div><div><label>Qué</label><input name=texto required placeholder="Chequear si contestó"></div><div><button>Crear aviso</button></div></form></div></div>
     ${chats.length ? `<div class="card"><h2>Chats pegados antes</h2>${chats.map(h => `<div class="card" style="background:#FFF8F6"><b>${fecha(h.creado)}</b><pre>${esc(h.resumen || '(sin resumen: falta la clave de IA)')}</pre></div>`).join('')}</div>` : ''}
-    ${c.fase !== 'lead' ? `<div class="grid"><div class="card"><h2>Pagos</h2><table>${pagos.map(p => `<tr><td>${fecha(p.fecha)}</td><td>${esc(p.que)}</td><td>${esc(p.medio)}${p.comprobante === false ? ` <form method=post action=/pago/${p.id}/comprobante style="display:inline"><span class="chip op">Falta comprobante</span> <button>Llegó</button></form>` : ''}</td><td>${dinero(p.monto, p.moneda)}</td></tr>`).join('') || '<tr><td class=mut>Sin pagos.</td></tr>'}</table></div>
+    ${c.fase !== 'lead' ? `<div class="grid"><div class="card"><h2>Pagos</h2><table>${pagos.map(p => `<tr><td>${fecha(p.fecha)}</td><td>${esc(p.que)}</td><td>${esc(p.medio)}${comps.filter(x => x.pago_id === p.id).map(x => ` <a class="chip ve" href="/comprobante/${x.id}" target=_blank rel=noopener title="${esc(x.nombre)}">📎 Comprobante</a>`).join('')}${p.comprobante === false ? ` <form method=post action=/pago/${p.id}/comprobante class=row style="display:inline-flex;gap:6px;margin-top:4px"><span class="chip op">Falta comprobante</span>${campoArchivo('')}<button>Subir / llegó</button></form>` : ''}</td><td>${dinero(p.monto, p.moneda)}</td></tr>`).join('') || '<tr><td class=mut>Sin pagos.</td></tr>'}</table></div>
     <div class="card"><h2>Reservas</h2>${reservas.map(r => `<div class=row style="justify-content:space-between"><span>${esc(r.servicio)}</span><form method=post action=/reserva/${r.id}/toggle><button>${r.estado === 'confirmada' ? 'Confirmada ✓' : 'Pendiente'}</button></form></div>`).join('') || '<p class=mut>Sin reservas.</p>'}
     <form method=post action=/caso/${c.id}/reserva class="row" style="margin-top:8px"><input name=servicio placeholder="Aéreo, hotel…" style="flex:1"><button>Agregar</button></form></div></div>` : ''}
     <div class="card"><h2>Actividad</h2>${acts.map(a => `<div>• ${esc(a.texto)} <span class=mut>${esc(a.quien || '')} · ${fecha(a.creada)}</span></div>`).join('')}</div>`, '/' + { lead: 'leads', oportunidad: 'oportunidades', venta: 'ventas', baja: 'leads' }[c.fase]);
@@ -637,8 +644,13 @@ module.exports = function (app, { wrap, page, log, hace }) {
   }));
 
   // ---------- comprobante de pago ----------
+  app.get('/comprobante/:id', wrap(async (req, res) => {
+    const a = await one('select * from comprobantes where id=$1', [req.params.id]); if (!a) return res.status(404).send('No existe');
+    res.set('Content-Type', a.tipo).set('Content-Disposition', `inline; filename="${encodeURIComponent(a.nombre)}"`).send(a.datos);
+  }));
   app.post('/pago/:id/comprobante', wrap(async (req, res) => {
     const p = await one('update pagos set comprobante=true where id=$1 returning *', [req.params.id]); if (!p) return res.redirect('/');
+    await guardarArchivo(p.caso_id, p.id, req.body);
     await q(`update avisos set hecho=true where caso_id=$1 and texto like 'Falta el comprobante%'`, [p.caso_id]);
     await q(`update casos set borrador=null, borrador_tipo=null where id=$1 and borrador_tipo='comprobante'`, [p.caso_id]);
     await log(p.caso_id, req.session.quien, `Llegó el comprobante (${p.que.toLowerCase()}).`);

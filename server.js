@@ -22,7 +22,7 @@ app.post('/webhooks/instagram', express.json({ limit: '1mb', verify: (req, res, 
 // WhatsApp (YCloud) avisa acá; se valida con la firma
 app.post('/webhooks/whatsapp', express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }), (req, res) => wa.recibir(req, res).catch(e => { console.error(e); if (!res.headersSent) res.sendStatus(500); }));
 app.get('/privacidad', (req, res) => res.send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Privacidad · Paybe</title><body style="font:16px/1.6 system-ui;max-width:640px;margin:40px auto;padding:0 20px;color:#1F3A4D"><h1>Política de privacidad</h1><p>Esta es una herramienta interna de Paybe Turismo (EVT 6263, Av. Fleming 1897, Martínez, Buenos Aires) para organizar las consultas de sus clientes.</p><p>Cuando alguien le escribe a Paybe por Instagram, guardamos su nombre de usuario y los mensajes de esa conversación, solo para poder responder la consulta y hacer el seguimiento del viaje. No vendemos ni compartimos esos datos con terceros, y no los usamos para publicidad.</p><p>Si querés que borremos tus datos, escribinos por Instagram a @paybe.turismo o acercate a la oficina y los eliminamos.</p></body>`));
-app.use(express.urlencoded({ extended: false, limit: '2mb' }));
+app.use(express.urlencoded({ extended: false, limit: '15mb' })); // 15 MB: los comprobantes viajan en el formulario
 require('./src/rutas').publica(app, { wrap: f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next) });
 app.use(cookieSession({ name: 's', secret: process.env.SESSION_SECRET || 'cambiar-en-produccion', maxAge: 30 * 864e5, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
@@ -124,9 +124,10 @@ app.post('/caso/:id/:accion', wrap(async (req, res, next) => {
     await q(`update avisos set hecho=true where caso_id=$1 and not hecho and texto ilike '%datos para la seña%'`, [c.id]);
   }
   if (a.pago) {
-    const medio = MEDIOS.includes(req.body.medio) ? req.body.medio : MEDIOS[0], pide = PIDE_COMPROBANTE.includes(medio);
+    const medio = MEDIOS.includes(req.body.medio) ? req.body.medio : MEDIOS[0], pide = PIDE_COMPROBANTE.includes(medio) && !req.body.archivo_b64;
     const monto = Number(String(req.body.monto || '').replace(/\./g, '').replace(',', '.')) || null;
-    await q('insert into pagos(caso_id,que,monto,medio,moneda,comprobante) values($1,$2,$3,$4,$5,$6)', [c.id, a.pago, monto, medio, req.body.moneda === 'ARS' ? 'ARS' : 'USD', !pide]);
+    const pago = await one('insert into pagos(caso_id,que,monto,medio,moneda,comprobante) values($1,$2,$3,$4,$5,$6) returning id', [c.id, a.pago, monto, medio, req.body.moneda === 'ARS' ? 'ARS' : 'USD', !pide]);
+    if (await app.locals.guardarArchivo(c.id, pago.id, req.body)) await log(c.id, req.session.quien, `Se subió el comprobante (${a.pago.toLowerCase()}).`);
     if (pide) { // falta el comprobante: aviso + mensaje armado para pedirlo
       const p = await one('select nombre from personas where id=$1', [c.persona_id]);
       const texto = reglas.completar((await reglas.mensajes()).comprobante, { nombre: reglas.primerNombre(p.nombre), medio: medio.toLowerCase(), destino: c.destino || 'el viaje' });

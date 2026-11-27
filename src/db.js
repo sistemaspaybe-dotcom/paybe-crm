@@ -73,6 +73,7 @@ alter table cotizaciones add column if not exists no_incluye text;
 alter table cotizaciones add column if not exists token text;
 alter table cotizaciones add column if not exists mandada_por text;
 alter table cotizaciones add column if not exists aviso_vence_en timestamptz;
+create table if not exists comprobantes (id serial primary key, caso_id int, pago_id int, nombre text, tipo text, datos bytea, creado timestamptz default now());
 alter table cotizaciones add column if not exists base_id int;
 alter table cotizaciones add column if not exists inicio timestamptz;
 alter table cotizaciones add column if not exists enviada_en timestamptz;
