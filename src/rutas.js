@@ -2,7 +2,7 @@
 const crypto = require('crypto');
 const { q, one } = require('./db');
 const { FASES, BAJAS, MOTIVOS, ESTADOS_DESTINO, MEDIOS, accionesPara } = require('./flow');
-const { esc, fecha, fechaDia, usd, dinero } = require('./views');
+const { esc, fecha, fechaDia, usd, dinero, CANALES, LOGOS, canalDeCaso } = require('./views');
 const ig = require('./instagram');
 const canales = require('./canales');
 const ia = require('./ia');
@@ -13,6 +13,12 @@ const campoArchivo = (txt = 'Comprobante (PDF o foto)') => `<label style="displa
 const guardarArchivo = async (casoId, pagoId, b) => {
   if (!b.archivo_b64) return null;
   return one('insert into comprobantes(caso_id,pago_id,nombre,tipo,datos) values($1,$2,$3,$4,$5) returning id', [casoId, pagoId, String(b.archivo_nombre || 'comprobante').slice(0, 200), String(b.archivo_tipo || 'application/octet-stream').slice(0, 100), Buffer.from(String(b.archivo_b64), 'base64')]);
+};
+// título de la ficha con el logo del canal por el que vino (último mensaje, o cómo se cargó)
+const tituloCaso = async c => {
+  const u = await one('select m.canal, p.origen from casos k join personas p on p.id=k.persona_id left join lateral (select canal from mensajes where caso_id=k.id order by creado desc limit 1) m on true where k.id=$1', [c.id]);
+  const k = canalDeCaso({ u_canal: u?.canal, origen: u?.origen }), [nom, col, bg] = CANALES[k];
+  return `<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span title="Vino por ${nom}" style="display:inline-flex;transform:scale(1.25)">${LOGOS[k]}</span><h1 style="margin:0">${esc(c.nombre)}</h1><span class=chip style="background:${bg};color:${col};font-size:13px">Vino por ${nom}</span></div>`;
 };
 const SEM = { verde: ['🟢', 'Para cotizar', '#E0F0E6', '#1E5A3A'], amarillo: ['🟡', 'Tibio', '#FFF3D6', '#8A5A00'], rojo: ['🔴', 'No cotizar', '#FBE4E7', '#B84A53'] };
 const n2 = v => v === '' || v == null ? null : v;
@@ -131,7 +137,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
       <form method=post action=/caso/${c.id}/enviar style="margin-top:10px"><textarea name=texto id=borrador rows=${Math.min(14, 3 + (c.borrador.match(/\n/g) || []).length)}>${esc(c.borrador)}</textarea>
       <div class="row" style="margin-top:8px">${puedeIG ? `<button class="p" name=como value=chat>Enviar por ${chat.nombre}</button>` : `<button type=button onclick="navigator.clipboard.writeText(document.getElementById('borrador').value);this.textContent='Copiado ✓'">Copiar</button>${c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : ''}${c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : ''}<button class="g" name=como value=manual>Ya lo mandé</button>`}
       <button formaction=/caso/${c.id}/borrador/descartar>Lo contesto yo</button></div>
-      ${chat && !chat.ventana ? `<p class=mut>Pasaron más de 24 h desde su último mensaje: ${chat.nombre} no deja mandarlo desde el CRM. Copialo y mandalo desde la app.</p>` : ''}</form></div>` : '';
+      ${chat?.agente ? `<p class=mut>Pasaron más de 24 h, pero como lo mandás vos, Instagram deja responder hasta 7 días después de su último mensaje.</p>` : chat && !chat.puede ? `<p class=mut>Pasaron más de ${chat.canal === 'instagram' ? '7 días' : '24 h'} desde su último mensaje: ${chat.nombre} no deja mandarlo desde el CRM. Copialo y mandalo desde la app.</p>` : ''}</form></div>` : '';
 
     // qué contestó a la cotización
     const mandadas = cots.filter(k => k.estado === 'mandada');
@@ -288,7 +294,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const faltaSalida = c.fase === 'venta' && !c.sale && ['reservando', 'saldo'].includes(c.etapa) ? '<div class="aviso">Cargá la fecha de salida (abajo, en "Sale") para que lleguen solos los avisos del saldo, 2 meses y 1 mes antes.</div>' : '';
     const recotizando = c.fase === 'lead' && c.etapa === 'recotizar' ? '<div class="aviso">↻ Confirmó, pero cambió el precio: cargá la tarifa nueva en el cotizador y la fecha de validez, y mandala.</div>' : '';
 
-    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}${subtabs(c, ds, cots, 'ficha')}${proximo}${tarjetaPasajeros}
+    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div>${await tituloCaso(c)}</div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}${subtabs(c, ds, cots, 'ficha')}${proximo}${tarjetaPasajeros}
     ${otras.length ? `<div class="aviso">Esta persona tiene ${otras.length} consulta${otras.length > 1 ? 's' : ''} más abierta${otras.length > 1 ? 's' : ''}: ${otras.map(o => `<a href="/caso/${o.id}">${esc(o.destino || 'consulta')} (${esc(FASES[o.fase].etapas[o.etapa] || o.etapa)})</a>`).join(', ')}</div>` : ''}
     ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
@@ -499,7 +505,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const fila = (i, n) => `<tr><td><input name="item_${n}" value="${esc(i.item)}" placeholder="Ítem"><input name="detalle_${n}" value="${esc(i.detalle)}" placeholder="Detalle" style="margin-top:4px;font-size:13px"></td><td><input name="proveedor_${n}" value="${esc(i.proveedor)}"><div class=row style="gap:4px;margin-top:4px;flex-wrap:nowrap"><input name="link_${n}" value="${esc(i.link || '')}" placeholder="Link (opcional)" inputmode=url style="font-size:13px;min-width:0">${/^https?:\/\//.test(i.link || '') ? `<a class=btn href="${esc(i.link)}" target=_blank rel=noopener title="Abrir el link" style="padding:6px 10px">↗</a>` : ''}</div></td><td><input name="costo_${n}" value="${i.costo ?? ''}" inputmode=decimal class=costo style="text-align:right"></td><td><input name="margen_${n}" value="${i.margen ?? ''}" inputmode=decimal class=margen style="text-align:right;width:70px"></td><td><select name="uso_${n}" class=uso style="width:auto">${Object.entries(USOS).map(([v, t]) => `<option value=${v}${(i.uso || 'incluido') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></td><td class=precio style="text-align:right;font-weight:700"></td><td><button type=button onclick="otraOpcionItem(this)" title="Otra opción de proveedor para este ítem" style="padding:6px 10px">+</button></td></tr>`;
     const chat = await canales.canalDe(c.id), ig_ok = !!chat?.puede;
     const [dsT, cotsT] = await Promise.all([q('select * from destinos where caso_id=$1 order by id', [c.id]), q('select * from cotizaciones where caso_id=$1 order by destino_id, version, id', [c.id])]);
-    page(req, res, 'Cotizar ' + d.nombre, `<div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1>${barraLinks(c)}${subtabs(c, dsT, cotsT, 'd' + d.id)}<h2 style="margin:6px 0 10px">${esc(d.nombre)} · cotización v${k.version}</h2>
+    page(req, res, 'Cotizar ' + d.nombre, `<div class=mut>${FASES[c.fase].nombre}</div>${await tituloCaso(c)}${barraLinks(c)}${subtabs(c, dsT, cotsT, 'd' + d.id)}<h2 style="margin:6px 0 10px">${esc(d.nombre)} · cotización v${k.version}</h2>
     <div class="card row" style="gap:24px"><span><span class=mut>Viajan</span><br><b>${esc(c.cuantos || '—')}</b></span><span><span class=mut>Fechas</span><br><b>${esc(d.fechas || '—')}${d.dias ? ' · ' + d.dias + ' días' : ''}</b></span><span><span class=mut>Salen de</span><br><b>${esc(c.salida || '—')}</b></span><span><span class=mut>Presupuesto</span><br><b>${d.presupuesto_usd ? usd(d.presupuesto_usd) + ' pp' : esc(c.presupuesto || '—')}</b></span><span class="chip">⏱ ${hace(k.inicio || k.creada)} cotizando</span></div>
     ${banco.length ? `<div class="card"><h2>Cotizaciones parecidas guardadas</h2><p class=mut>Usá una como base: se copian los ítems y solo actualizás los precios.</p>${banco.map(b => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid #F0E6E1"><span><b>${esc(b.viaje)}</b> <span class=mut>· ${esc(b.nombre || '')} · ${esc(b.cuantos || '')} · ${esc(b.estado)}</span></span><span class=row><b>${dinero(b.precio_pp, b.moneda)} pp</b><a class="btn" href="/destino/${d.id}/cotizar?base=${b.id}">Usar como base</a></span></div>`).join('')}</div>` : ''}
     <form method=post action=/cotizacion/${k.id}>
@@ -511,7 +517,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     <div class="card" id=resumen><h2>Resumen · por persona</h2><table><tr><td>Costo</td><td id=r_costo style="text-align:right"></td></tr><tr><td>Margen</td><td id=r_margen style="text-align:right"></td></tr><tr><td><b>Precio</b></td><td id=r_precio style="text-align:right;font-size:20px;font-weight:700"></td></tr><tr id=f_opc style="display:none"><td class=mut>Opcionales (aparte)</td><td id=r_opc class=mut style="text-align:right"></td></tr></table>
     <div id=r_presu class="aviso" style="margin-top:8px"></div><div id=r_alerta class="aviso rojo" style="display:none">Margen bajo: menos del 10%. Revisalo antes de mandar.</div><div class=mut id=r_total></div></div></div>
     <div class="card row"><button name=accion value=guardar>Guardar</button><button name=accion value=ver>Guardar y ver la propuesta</button>${ig_ok ? `<button class="p" name=accion value=mandar_chat>Mandar por ${chat.nombre}</button>` : ''}<button class="${ig_ok ? '' : 'p'}" name=accion value=mandar_manual>${ig_ok ? 'Ya la mandé por otro lado' : 'Ya la mandé (WhatsApp o la app)'}</button>
-    ${chat && !chat.ventana ? `<span class=mut>Pasaron más de 24 h desde su último mensaje: ${chat.nombre} no deja mandarla desde el CRM. Abrí la propuesta, copiá el link y mandalo desde la app.</span>` : ''}</div></form>
+    ${chat && !chat.puede ? `<span class=mut>Pasaron más de ${chat.canal === 'instagram' ? '7 días' : '24 h'} desde su último mensaje: ${chat.nombre} no deja mandarla desde el CRM. Abrí la propuesta, copiá el link y mandalo desde la app.</span>` : ''}</div></form>
     <script>
     const presuUSD=${Number(d.presupuesto_usd) || 0};const f=n=>(moneda.value==='ARS'?'$ ':'USD ')+Math.round(n).toLocaleString('es-AR');
     // + en una fila: otra opción de proveedor para el mismo ítem (entra como Alternativa: no suma hasta elegirla)
@@ -565,11 +571,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
       `<button type=button onclick="${copiar}this.textContent='Mensaje copiado ✓'">Copiar mensaje con el link</button>`,
       `<button type=button onclick="document.querySelector('iframe').contentWindow.print()">Descargar PDF</button>`,
     ].filter(Boolean).join('');
-    const envio = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${borrador ? 'Mandársela' : 'Volver a mandársela'}</h2>${chat ? `<span class=mut>Escribió por ${chat.nombre}${chat.ventana ? '' : ' hace más de 24 h (no se puede mandar desde el CRM)'}</span>` : ''}</div>
+    const envio = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${borrador ? 'Mandársela' : 'Volver a mandársela'}</h2>${chat ? `<span class=mut>Escribió por ${chat.nombre}${chat.puede ? '' : ` hace más de ${chat.canal === 'instagram' ? '7 días' : '24 h'} (no se puede mandar desde el CRM)`}</span>` : ''}</div>
       <div class=row style="margin-top:10px;gap:8px;flex-wrap:wrap">${opciones}</div>
       ${!wa || !ig || !c.mail ? `<p class=mut style="margin-top:8px">${!wa && !ig && !c.mail ? 'Este lead no tiene WhatsApp, Instagram ni mail cargados' : 'Falta cargar ' + [!wa && 'WhatsApp', !ig && 'Instagram', !c.mail && 'mail'].filter(Boolean).join(', ')}: <a href="/persona/${c.persona_id}">cargalos en la persona</a> y aparece el botón para mandarlo por ahí.</p>` : ''}
       ${borrador ? `<form method=post action=/cotizacion/${k.id}/mandar class=row style="margin-top:10px;gap:8px;align-items:center"><input type=hidden name=como value=manual><span class=mut>¿La mandaste por WhatsApp, Instagram, mail o el PDF desde afuera?</span><button>Ya la mandé → Esperando respuesta</button></form>` : `<p style="margin-top:8px"><b>✓ Esta versión ya se mandó${k.mandada ? ' el ' + fecha(k.mandada) : ''}${k.mandada_por ? (k.mandada_por === 'a mano' ? ' a mano' : ' por ' + esc(k.mandada_por)) : ''}.</b> <span class=mut>Si la volvés a mandar, queda registrado.</span></p>`}</div>`;
-    page(req, res, 'Propuesta ' + (d?.nombre || ''), `<div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1>${barraLinks(c)}${subtabs(c, ds, cots, 'p' + k.id)}
+    page(req, res, 'Propuesta ' + (d?.nombre || ''), `<div class=mut>${FASES[c.fase].nombre}</div>${await tituloCaso(c)}${barraLinks(c)}${subtabs(c, ds, cots, 'p' + k.id)}
       <div class="row" style="justify-content:space-between;margin:6px 0 10px"><h2 style="margin:0">${esc(d?.nombre || k.viaje || '')} · propuesta v${k.version}${k.estado === 'borrador' ? ' <span class=chip>borrador</span>' : ''}</h2>
       <span class=row>${k.estado === 'borrador' && d ? `<a class="btn p" href="/destino/${d.id}/cotizar">✎ Seguir editando</a>` : ''}<a class=btn href="/c/${k.token}" target=_blank rel=noopener>Abrir aparte ↗</a></span></div>
       ${envio}
