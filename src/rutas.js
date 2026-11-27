@@ -23,6 +23,27 @@ const totales = items => {
   return { opcionales: Math.round(opcionales), costo: Math.round(costo), precio: Math.round(precio), margen: Math.round(precio - costo), pct: precio ? Math.round((precio - costo) / precio * 1000) / 10 : 0 };
 };
 
+// subpestañas (como las de Salesforce): la ficha del lead y cada cotización abierta, siempre visibles arriba
+const subtabs = (c, ds, cots, activo) => {
+  const tabs = [`<a class="st${activo === 'ficha' ? ' on' : ''}" href="/caso/${c.id}">👤 Ficha del ${FASES[c.fase]?.nombre?.toLowerCase() || "lead"}</a>`];
+  for (const d of ds) {
+    const ks = cots.filter(k => k.destino_id === d.id);
+    const b = ks.find(k => k.estado === 'borrador'), m = [...ks].reverse().find(k => k.estado !== 'borrador' && k.estado !== 'reemplazada' && k.token);
+    if (b) tabs.push(`<a class="st${activo === 'd' + d.id ? ' on' : ''}" href="/destino/${d.id}/cotizar">✎ ${esc(d.nombre)} · v${b.version}</a>`);
+    else if (m) tabs.push(`<a class="st" href="/c/${m.token}" target=_blank rel=noopener>📄 ${esc(d.nombre)} · v${m.version} ↗</a>`);
+  }
+  return `<style>.subtabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:2px solid #F0E6E1;margin:14px 0 10px}.subtabs .st{padding:9px 14px;border-radius:10px 10px 0 0;background:#FBE9E6;color:#5A6670;font-weight:700;font-size:14px;text-decoration:none;margin-bottom:-2px;border:2px solid transparent;border-bottom:none}.subtabs .st:hover{color:var(--azul)}.subtabs .st.on{background:#fff;color:var(--azul);border-color:#F0E6E1}</style><div class=subtabs>${tabs.join('')}</div>`;
+};
+const etapasDe = c => c.fase === 'lead' ? [[...Object.entries(FASES.lead.etapas), ['convertido', 'Convertido']], []]
+  : c.fase === 'oportunidad' ? [Object.entries(FASES.oportunidad.etapas), ['Lead · Convertido ✓']]
+  : c.fase === 'venta' ? [Object.entries(FASES.venta.etapas), ['Convertido ✓', 'Seña ✓']] : null;
+// la misma barra de estados, en páginas que no son la ficha: tocar un estado abre la ficha con ese estado a la vista
+const barraLinks = c => {
+  const e = etapasDe(c); if (!e) return '';
+  const [lista, previos] = e, idx = lista.findIndex(([x]) => x === c.etapa);
+  return `<style>.bar a.et{display:block;color:inherit;text-decoration:none}.bar>div:has(a.et):hover{outline:2px solid var(--coral);outline-offset:-2px}</style><div class="bar">${previos.map(p => `<div class="ok">${p}</div>`).join('')}${lista.map(([k, n], i) => `<div class="${i < idx ? 'ok' : i === idx ? 'now' : ''}"><a class=et href="/caso/${c.id}?paso=${k}" title="Ver ${esc(n)} en la ficha">${n}${i < idx ? ' ✓' : ''}</a></div>`).join('')}</div>`;
+};
+
 module.exports = function (app, { wrap, page, log, hace }) {
 
   // ---------- la ficha ----------
@@ -78,7 +99,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
       return `<style>.bar button.et{all:unset;display:block;width:100%;height:100%;cursor:pointer;text-align:center;box-sizing:border-box}.bar>div:has(button.et):hover,.bar>div.sel{outline:2px solid var(--coral);outline-offset:-2px}</style>
       <div class="bar">${previos.map(p => `<div class="ok">${p}</div>`).join('')}${lista.map(([k, n], i) => `<div class="${i < idx ? 'ok' : i === idx ? 'now' : ''}${k === actual ? ' sel' : ''}" data-et="${k}"><button type=button class=et onclick="verPaso('${k}')" title="Ver ${esc(n)}">${n}${i < idx ? ' ✓' : ''}</button></div>`).join('')}</div>
       ${lista.map(panel).join('')}
-      <script>function verPaso(k){document.querySelectorAll('.paso').forEach(p=>p.style.display=p.dataset.paso===k?'':'none');document.querySelectorAll('.bar>div[data-et]').forEach(d=>d.classList.toggle('sel',d.dataset.et===k))}</script>`;
+      <script>function verPaso(k){document.querySelectorAll('.paso').forEach(p=>p.style.display=p.dataset.paso===k?'':'none');document.querySelectorAll('.bar>div[data-et]').forEach(d=>d.classList.toggle('sel',d.dataset.et===k))}${req.query.paso ? `verPaso(${JSON.stringify(String(req.query.paso).replace(/[^a-z_]/g, ''))})` : ''}</script>`;
     };
     let bar = '';
     if (c.fase === 'lead') bar = barra([...Object.entries(FASES.lead.etapas), ['convertido', 'Convertido']], c.etapa);
@@ -182,7 +203,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const faltaSalida = c.fase === 'venta' && !c.sale && ['reservando', 'saldo'].includes(c.etapa) ? '<div class="aviso">Cargá la fecha de salida (abajo, en "Sale") para que lleguen solos los avisos del saldo, 2 meses y 1 mes antes.</div>' : '';
     const recotizando = c.fase === 'lead' && c.etapa === 'recotizar' ? '<div class="aviso">↻ Confirmó, pero cambió el precio: cargá la tarifa nueva en el cotizador y la fecha de validez, y mandala.</div>' : '';
 
-    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}
+    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}${subtabs(c, ds, cots, 'ficha')}
     ${otras.length ? `<div class="aviso">Esta persona tiene ${otras.length} consulta${otras.length > 1 ? 's' : ''} más abierta${otras.length > 1 ? 's' : ''}: ${otras.map(o => `<a href="/caso/${o.id}">${esc(o.destino || 'consulta')} (${esc(FASES[o.fase].etapas[o.etapa] || o.etapa)})</a>`).join(', ')}</div>` : ''}
     ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
@@ -393,7 +414,8 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const mon = k.moneda === 'ARS' ? 'ARS' : 'USD';
     const fila = (i, n) => `<tr><td><input name="item_${n}" value="${esc(i.item)}" placeholder="Ítem"><input name="detalle_${n}" value="${esc(i.detalle)}" placeholder="Detalle" style="margin-top:4px;font-size:13px"></td><td><input name="proveedor_${n}" value="${esc(i.proveedor)}"><div class=row style="gap:4px;margin-top:4px;flex-wrap:nowrap"><input name="link_${n}" value="${esc(i.link || '')}" placeholder="Link (opcional)" inputmode=url style="font-size:13px;min-width:0">${/^https?:\/\//.test(i.link || '') ? `<a class=btn href="${esc(i.link)}" target=_blank rel=noopener title="Abrir el link" style="padding:6px 10px">↗</a>` : ''}</div></td><td><input name="costo_${n}" value="${i.costo ?? ''}" inputmode=decimal class=costo style="text-align:right"></td><td><input name="margen_${n}" value="${i.margen ?? ''}" inputmode=decimal class=margen style="text-align:right;width:70px"></td><td><select name="uso_${n}" class=uso style="width:auto">${Object.entries(USOS).map(([v, t]) => `<option value=${v}${(i.uso || 'incluido') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></td><td class=precio style="text-align:right;font-weight:700"></td><td><button type=button onclick="otraOpcionItem(this)" title="Otra opción de proveedor para este ítem" style="padding:6px 10px">+</button></td></tr>`;
     const chat = await canales.canalDe(c.id), ig_ok = !!chat?.puede;
-    page(req, res, 'Cotizar ' + d.nombre, `<div class=mut><a href="/caso/${c.id}">← ${esc(c.nombre)}</a> · ${FASES[c.fase].nombre}</div><h1>${esc(d.nombre)} · cotización v${k.version}</h1>
+    const [dsT, cotsT] = await Promise.all([q('select * from destinos where caso_id=$1 order by id', [c.id]), q('select * from cotizaciones where caso_id=$1 order by destino_id, version, id', [c.id])]);
+    page(req, res, 'Cotizar ' + d.nombre, `<div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1>${barraLinks(c)}${subtabs(c, dsT, cotsT, 'd' + d.id)}<h2 style="margin:6px 0 10px">${esc(d.nombre)} · cotización v${k.version}</h2>
     <div class="card row" style="gap:24px"><span><span class=mut>Viajan</span><br><b>${esc(c.cuantos || '—')}</b></span><span><span class=mut>Fechas</span><br><b>${esc(d.fechas || '—')}${d.dias ? ' · ' + d.dias + ' días' : ''}</b></span><span><span class=mut>Salen de</span><br><b>${esc(c.salida || '—')}</b></span><span><span class=mut>Presupuesto</span><br><b>${d.presupuesto_usd ? usd(d.presupuesto_usd) + ' pp' : esc(c.presupuesto || '—')}</b></span><span class="chip">⏱ ${hace(k.inicio || k.creada)} cotizando</span></div>
     ${banco.length ? `<div class="card"><h2>Cotizaciones parecidas guardadas</h2><p class=mut>Usá una como base: se copian los ítems y solo actualizás los precios.</p>${banco.map(b => `<div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid #F0E6E1"><span><b>${esc(b.viaje)}</b> <span class=mut>· ${esc(b.nombre || '')} · ${esc(b.cuantos || '')} · ${esc(b.estado)}</span></span><span class=row><b>${dinero(b.precio_pp, b.moneda)} pp</b><a class="btn" href="/destino/${d.id}/cotizar?base=${b.id}">Usar como base</a></span></div>`).join('')}</div>` : ''}
     <form method=post action=/cotizacion/${k.id}>
