@@ -4,7 +4,7 @@ const { q, one } = require('./db');
 
 const DEFAULTS = {
   preguntas: {
-    'Viaje a medida': ['Para cuándo y cuántos días', 'Cuántos viajan (y si hay menores)', 'Presupuesto aproximado por persona', 'Desde dónde salen', 'Para cuándo querrían tenerlo confirmado', 'Si es por una ocasión especial (cumpleaños, luna de miel, viaje soñado)', 'Qué categoría buscan (aéreo económico o business, tipo de alojamiento)'],
+    'Viaje a medida': ['Para cuándo y cuántos días', 'Cuántos viajan (y si hay menores)', 'Presupuesto aproximado por persona', 'Desde dónde salen', 'Cómo les gustaría viajar: vuelo económico o business, y alojamiento (hotel 3, 4 o 5 estrellas, all inclusive o departamento)', 'Si es por algo especial: cumpleaños, luna de miel, aniversario, despedida de solteros (opcional)'],
     'Aéreo': ['Origen y destino', 'Fechas de ida y vuelta', 'Cuántos pasajeros', 'Si llevan valija en bodega'],
     'Hotel': ['Destino y fechas', 'Cuántas habitaciones y personas', 'Qué categoría buscan'],
     'Visa': ['Qué país', 'Cuándo viajan', 'Si tienen pasaporte vigente', 'Si es la primera vez que la tramitan'],
@@ -53,6 +53,13 @@ const mensajes = async () => ({ ...DEFAULTS.mensajes, ...(await leer('mensajes')
 async function migrar() {
   const r2 = await one("select valor from ajustes where clave='reglas_preguntas'");
   if (r2) { const p = JSON.parse(r2.valor); let cambio = false; for (const [t, l] of Object.entries(DEFAULTS.preguntas)) if (!p[t]) { p[t] = l; cambio = true; } if (cambio) await guardar('preguntas', p); }
+  // 27/11: se saca "cuándo lo quieren confirmado" y se aclaran categoría y ocasión especial en lo guardado
+  if (r2 && !await one("select 1 from ajustes where clave='migracion_preguntas_2711'")) {
+    const p = JSON.parse((await one("select valor from ajustes where clave='reglas_preguntas'")).valor);
+    for (const t of Object.keys(p)) p[t] = p[t].filter(x => !/confirmad/i.test(x)).map(x => /^Qué categoría buscan \(aéreo/i.test(x) ? DEFAULTS.preguntas['Viaje a medida'].find(y => /^Cómo les gustaría viajar/.test(y)) : /^Si es por una ocasión especial/i.test(x) ? DEFAULTS.preguntas['Viaje a medida'].find(y => /^Si es por algo especial/.test(y)) : x);
+    await guardar('preguntas', p);
+    await q("insert into ajustes(clave, valor) values('migracion_preguntas_2711','1') on conflict do nothing");
+  }
   if (await one("select 1 from ajustes where clave='migracion_preguntas_2411'")) return;
   const r = await one("select valor from ajustes where clave='reglas_preguntas'");
   if (r) {
