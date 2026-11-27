@@ -62,10 +62,18 @@ const queHago = c => {
   return c.borrador ? '<span style="color:#B84A53;font-weight:800">✎ Mandar el borrador</span>' : '<span class=mut>Sin chat</span>';
 };
 const chipSugerencia = c => c.sugerencia ? `<div style="margin-top:6px;padding:6px 8px;background:#FFF3D6;border-radius:8px;font-size:13px"><b>🤔 ${c.sugerencia === 'personal' ? '¿Es personal de Sol?' : '¿No es una consulta?'}</b>${c.sugerencia_por ? ` <span class=mut>${esc(c.sugerencia_por)}</span>` : ''}<div class=row style="gap:6px;margin-top:4px">${c.sugerencia === 'personal' ? `<form method=post action=/persona/${c.persona_id}/personal onsubmit="return confirm('¿Es un contacto personal de Sol? Se borran sus mensajes del CRM y no vuelve a entrar nada de este contacto.')"><button style="padding:3px 10px;font-size:12px">Sí, personal</button></form>` : `<form method=post action=/caso/${c.id}/filtrar><input type=hidden name=motivo value=no_consulta><button style="padding:3px 10px;font-size:12px">Sí, a Filtrados</button></form>`}<form method=post action=/caso/${c.id}/es-consulta-ok><button style="padding:3px 10px;font-size:12px">No, es consulta</button></form></div></div>` : '';
+// borrar solo se puede si nunca se le pidieron datos ni se le cotizó: si no contesta, eso es Perdido, no se borra
+const sePuedeBorrar = c => c.fase === 'lead' && ['nuevo', 'preguntando'].includes(c.etapa);
+const accionesFila = c => c.fase !== 'lead' ? '' : `<div style="display:grid;gap:6px;justify-items:end">
+  <details style="position:relative"><summary class=btn style="list-style:none;cursor:pointer;padding:5px 12px;font-size:13px;white-space:nowrap">Filtrar ▾</summary>
+    <form method=post action=/caso/${c.id}/filtrar style="position:absolute;right:0;top:calc(100% + 4px);z-index:5;background:#fff;border:1px solid var(--linea);border-radius:12px;padding:8px;display:grid;gap:6px;min-width:220px;box-shadow:0 6px 20px rgba(31,58,77,.12)">
+      <button name=motivo value=personal style="text-align:left" onclick="return confirm('¿Es un contacto personal de Sol? Se borran sus mensajes del CRM y no vuelve a entrar nada de este contacto.')">Personal (de Sol)</button>
+      <button name=motivo value=no_consulta style="text-align:left">No es una consulta</button><button name=motivo value=proveedor style="text-align:left">Proveedor u otra agencia</button><button name=motivo value=spam style="text-align:left">Spam o publicidad</button></form></details>
+  ${sePuedeBorrar(c) ? `<form method=post action=/caso/${c.id}/borrar onsubmit="return confirm('¿Borrar esta conversación del CRM? No se puede deshacer. (Si es un cliente que no contesta, usá Perdido en la ficha.)')"><button style="padding:5px 12px;font-size:13px;color:#B84A53;white-space:nowrap">🗑 Borrar</button></form>` : ''}</div>`;
 const filaCaso = c => `<tr><td style="width:88px;text-align:center" title="${CANALES[canalDe(c)][0]}">${LOGOS[canalDe(c)]}<div class=mut style="font-size:11px;margin-top:2px">${CANALES[canalDe(c)][0]}</div></td><td style="min-width:170px"><a href="/caso/${c.id}"><b>${c.origen === 'Demo' ? '🧪 ' : ''}${esc(c.nombre)}</b></a><div style="margin-top:4px">${chipsDestinos(c) || `<span class="mut">${esc(c.destino || '')}</span>`}</div>${chipSugerencia(c)}</td>
   <td style="max-width:380px">${c.u_texto != null ? `<a href="/caso/${c.id}" style="color:inherit;text-decoration:none;display:block"><span class=mut style="font-size:13px">${c.u_entrante ? esc(String(c.nombre || '').split(' ')[0]) + ':' : 'Vos:'}</span> <span style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(String(c.u_texto).slice(0, 200))}</span></a>` : `<span class=mut>${esc(c.destino || c.servicio || '—')}</span>`}</td>
   <td style="min-width:180px">${queHago(c)}</td>
-  <td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span></td><td class="mut">${fecha(c.actualizado)}</td></tr>`;
+  <td>${chipFase(c.fase)}${esc(FASES[c.fase].etapas[c.etapa])}</span></td><td class="mut">${fecha(c.actualizado)}</td><td style="text-align:right">${accionesFila(c)}</td></tr>`;
 async function lista(req, res, fase, titulo, ruta) {
   const rows = await q(`select c.*, p.nombre,
     (select entrante from mensajes m where m.caso_id=c.id order by creado desc limit 1) ult_entrante,
@@ -91,10 +99,22 @@ async function lista(req, res, fase, titulo, ruta) {
   if (filtro) rows.splice(0, rows.length, ...rows.filter(filtro));
   const nSug = rows.filter(r => r.sugerencia).length;
   const revisar = fase === 'lead' ? `<div class=row style="gap:8px;align-items:center;margin:4px 0 8px">${req.query.revisando ? '<span class="aviso" style="margin:0">La IA está revisando los chats (no manda nada). Recargá en un minuto.</span>' : ''}<form method=post action=/leads/revisar><button>🤖 Revisar con IA cuáles son personales</button></form>${nSug ? `<span class=mut>${nSug} para revisar: se marcan con 🤔</span>` : ''}</div>` : '';
-  const tabs = (fase === 'lead' ? await conv.encabezado('leads', total) : `<h1>${titulo} · ${total}</h1>`) + (req.query.personal ? '<div class="aviso">Listo: marcado como personal. Se borraron sus mensajes y no vuelve a entrar nada de ese contacto. Se puede deshacer en Ajustes.</div>' : '') + (req.query.filtrado ? '<div class="aviso">Listo: pasó a Filtrados. Si fue un error, en Filtrados está "Es consulta".</div>' : '');
-  page(req, res, titulo, `${tabs}${revisar}<p>${porEtapa}</p><div class="card"><table><tr><th>Canal</th><th>Persona</th><th>Último mensaje</th><th>Qué hago</th><th>Etapa del lead</th><th>Último cambio</th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=6 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
+  const tabs = (fase === 'lead' ? await conv.encabezado('leads', total) : `<h1>${titulo} · ${total}</h1>`) + (req.query.personal ? '<div class="aviso">Listo: marcado como personal. Se borraron sus mensajes y no vuelve a entrar nada de ese contacto. Se puede deshacer en Ajustes.</div>' : '') + (req.query.borrado ? '<div class="aviso">Listo: se borró la conversación del CRM. Si vuelve a escribir, entra como lead nuevo.</div>' : '') + (req.query.filtrado ? '<div class="aviso">Listo: pasó a Filtrados. Si fue un error, en Filtrados está "Es consulta".</div>' : '');
+  page(req, res, titulo, `${tabs}${revisar}<p>${porEtapa}</p><div class="card"><table><tr><th>Canal</th><th>Persona</th><th>Último mensaje</th><th>Qué hago</th><th>Etapa del lead</th><th>Último cambio</th><th></th></tr>${rows.map(filaCaso).join('') || '<tr><td colspan=7 class=mut>Todavía no hay nada acá.</td></tr>'}</table></div>`, ruta);
 }
 conv.rutas(app, { wrap, page, log, ig });
+app.post('/caso/:id/borrar', wrap(async (req, res) => {
+  const c = await one('select * from casos where id=$1', [req.params.id]);
+  if (!c || !sePuedeBorrar(c) || await one(`select 1 from cotizaciones where caso_id=$1 and estado<>'borrador'`, [c.id])) return res.redirect(req.get('referer') || '/leads');
+  await q('delete from mensajes where caso_id=$1', [c.id]);
+  await q('delete from casos where id=$1', [c.id]); // destinos, avisos, actividad y borradores se van con el caso
+  if (!await one('select 1 from casos where persona_id=$1', [c.persona_id])) {
+    await q('delete from mensajes where persona_id=$1', [c.persona_id]);
+    await q('delete from conversaciones where persona_id=$1', [c.persona_id]);
+    await q('delete from personas where id=$1 and not personal', [c.persona_id]);
+  }
+  res.redirect('/leads?borrado=1');
+}));
 // sugerencias de la IA sobre qué es cada chat
 app.post('/caso/:id/es-consulta-ok', wrap(async (req, res) => {
   await q('update casos set sugerencia=null, sugerencia_por=null where id=$1', [req.params.id]);
