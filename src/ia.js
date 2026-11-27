@@ -8,12 +8,13 @@ const anotar = (casoId, texto) => q('insert into actividad(caso_id,quien,texto) 
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 
 let cola = Promise.resolve();
-const enCola = f => (cola = cola.then(f).catch(e => console.error('IA:', e.message)));
+// si la IA falla, queda anotado en la actividad del caso (así se ve, no solo en los logs)
+const enCola = (f, casoId) => (cola = cola.then(f).catch(e => { console.error('IA:', e.message); if (casoId) anotar(casoId, 'La IA no pudo leer el chat: ' + String(e.message).slice(0, 300)).catch(() => {}); }));
 const pendientes = new Map(); // espera unos segundos por si llegan varios mensajes seguidos
 function programar(casoId) {
   if (!hayIA()) return enCola(() => preguntasSinIA(casoId));
   clearTimeout(pendientes.get(casoId));
-  pendientes.set(casoId, setTimeout(() => { pendientes.delete(casoId); enCola(() => analizar(casoId)); }, Number(process.env.IA_ESPERA_MS) || 4000));
+  pendientes.set(casoId, setTimeout(() => { pendientes.delete(casoId); enCola(() => analizar(casoId), casoId); }, Number(process.env.IA_ESPERA_MS) || 4000));
 }
 
 async function preguntarIA(pedido, maxTokens = 1200) {
@@ -21,7 +22,7 @@ async function preguntarIA(pedido, maxTokens = 1200) {
     method: 'POST', headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model: process.env.AI_MODEL || 'claude-haiku-5-5', max_tokens: maxTokens, messages: [{ role: 'user', content: pedido }] }),
   }).then(r => r.json());
-  if (r.error) throw new Error(r.error.message || 'error de la IA');
+  if (r.error) throw new Error((r.error.type ? r.error.type + ': ' : '') + (r.error.message || 'error de la IA'));
   const t = r.content?.[0]?.text || '';
   try { return JSON.parse(t.match(/\{[\s\S]*\}/)?.[0]); } catch { return null; }
 }
@@ -69,7 +70,7 @@ Ya conocidos: nombre ${JSON.stringify(c.nombre)}${destinosAntes.length ? `, dest
 ${hilo}
 </conversacion>`;
   const d = await preguntarIA(pedido);
-  if (!d || typeof d !== 'object') return;
+  if (!d || typeof d !== 'object') throw new Error('la respuesta de la IA no vino en el formato esperado');
 
   // 1 · ¿es una consulta? Solo se filtra si el equipo todavía no le escribió
   if (d.es_consulta === false && c.etapa === 'nuevo' && !await one('select 1 from mensajes where caso_id=$1 and not entrante', [c.id])
