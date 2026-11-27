@@ -28,6 +28,7 @@ const DEFAULTS = {
   mensajes: {
     presupuesto_bajo: '¡Hola {nombre}! Gracias por escribirnos 😊 En Paybe cuidamos mucho la calidad de cada viaje (hoteles, traslados, asistencia y que todo salga bien), y para {destino} en esas fechas eso arranca en {minimo} por persona. Te proponemos tres caminos: sumar un poco al presupuesto, hacerlo con menos días, o pensar otro destino que con lo que tenés en mente te dé un viajazo. ¿Cuál te cierra más?',
     sena: '¡Hola {nombre}! ¿Cómo va? Te escribo para saber si siguen con la idea de {destino}. Las tarifas tienen validez limitada, así que si quieren avanzar avisanos y lo reservamos.',
+    datos_sena: '¡Qué bueno, {nombre}! 🙌 Para reservar {destino} se abona una seña de {sena} ({total_sena} en total). Te paso los datos para transferir:\nAlias: COMPLETAR EN AJUSTES\nCBU: COMPLETAR EN AJUSTES\nTitular: Paybe Turismo\nCuando la hagas, mandanos el comprobante por acá y reservamos todo. La tarifa vale hasta el {vence}.',
     comprobante: '¡Hola {nombre}! Gracias por el pago 🙌 ¿Nos mandás el comprobante de la {medio} así lo dejamos registrado?',
     saldo_60: '¡Hola {nombre}! Ya falta poco para {destino} ✈️ Te recordamos que el saldo del viaje se completa hasta 30 días antes de la salida: queda el último mes. Cualquier duda, escribinos.',
     saldo_30: '¡Hola {nombre}! Faltan 30 días para {destino}. Hoy vence el plazo del saldo: sin el pago se pierden las reservas. ¿Lo coordinamos?',
@@ -35,7 +36,7 @@ const DEFAULTS = {
   // borrador con lo que dijo Sol (24/11): que lo lea ella antes de que salga en las propuestas
   bases: 'Para reservar se abona una seña del 50% del total. El saldo se completa hasta 30 días antes de la salida; sin ese pago se pierden las reservas. Los aéreos son intransferibles y, una vez emitidos, no tienen devolución; cualquier cambio está sujeto a penalidad y a la diferencia de tarifa. Los hoteles se reservan con tarifa cancelable según las condiciones de cada uno. Las tarifas están sujetas a disponibilidad hasta el momento de la reserva y valen hasta la fecha indicada en la propuesta.',
 };
-const ETIQUETAS_MENSAJES = { presupuesto_bajo: 'Presupuesto bajo (semáforo rojo)', sena: 'La seña no llega (a los 3 días)', comprobante: 'Pedir el comprobante', saldo_60: 'Saldo: 2 meses antes', saldo_30: 'Saldo: 1 mes antes' };
+const ETIQUETAS_MENSAJES = { datos_sena: 'Datos para la seña (cuando dice que sí)', presupuesto_bajo: 'Presupuesto bajo (semáforo rojo)', sena: 'La seña no llega (a los 3 días)', comprobante: 'Pedir el comprobante', saldo_60: 'Saldo: 2 meses antes', saldo_30: 'Saldo: 1 mes antes' };
 const completar = (t, v) => String(t || '').replace(/\{(\w+)\}/g, (m, k) => v[k] ?? m);
 const primerNombre = n => String(n || '').replace(/^@/, '').split(' ')[0];
 

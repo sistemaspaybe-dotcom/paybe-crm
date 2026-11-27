@@ -25,11 +25,11 @@ const totales = items => {
 
 // subpestañas (como las de Salesforce): la ficha del lead y cada cotización abierta, siempre visibles arriba
 const subtabs = (c, ds, cots, activo) => {
-  const tabs = [`<a class="st${activo === 'ficha' ? ' on' : ''}" href="/caso/${c.id}">👤 Ficha del ${FASES[c.fase]?.nombre?.toLowerCase() || "lead"}</a>`];
+  const tabs = [`<a class="st${activo === 'ficha' ? ' on' : ''}" href="/caso/${c.id}">👤 Ficha ${{ lead: 'del lead', oportunidad: 'de la oportunidad', venta: 'de la venta', baja: 'del perdido' }[c.fase] || ''}</a>`];
   for (const d of ds) {
     const ks = cots.filter(k => k.destino_id === d.id);
     const b = ks.find(k => k.estado === 'borrador'), m = [...ks].reverse().find(k => k.estado !== 'borrador' && k.estado !== 'reemplazada' && k.token);
-    if (b) tabs.push(`<a class="st${activo === 'd' + d.id ? ' on' : ''}" href="/destino/${d.id}/cotizar">✎ ${esc(d.nombre)} · v${b.version}</a>`, `<a class="st${activo === 'p' + b.id ? ' on' : ''}" href="/cotizacion/${b.id}/propuesta">👁 Propuesta v${b.version}</a>`);
+    if (b && c.fase === 'lead') tabs.push(`<a class="st${activo === 'd' + d.id ? ' on' : ''}" href="/destino/${d.id}/cotizar">✎ ${esc(d.nombre)} · v${b.version}</a>`, `<a class="st${activo === 'p' + b.id ? ' on' : ''}" href="/cotizacion/${b.id}/propuesta">👁 Propuesta v${b.version}</a>`);
     else if (m) tabs.push(`<a class="st${activo === 'p' + m.id ? ' on' : ''}" href="/cotizacion/${m.id}/propuesta">📄 ${esc(d.nombre)} · v${m.version}</a>`);
   }
   return `<style>.subtabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:2px solid #F0E6E1;margin:14px 0 10px}.subtabs .st{padding:9px 14px;border-radius:10px 10px 0 0;background:#FBE9E6;color:#5A6670;font-weight:700;font-size:14px;text-decoration:none;margin-bottom:-2px;border:2px solid transparent;border-bottom:none}.subtabs .st:hover{color:var(--azul)}.subtabs .st.on{background:#fff;color:var(--azul);border-color:#F0E6E1}</style><div class=subtabs>${tabs.join('')}</div>`;
@@ -93,7 +93,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
       const panel = ([k, n]) => {
         const hist = acts.filter(a => a.texto && a.texto.includes(n)).slice(0, 4);
         const mover = k === actual ? `<span class="chip ve">Etapa actual</span>` : k === 'convertido' ? '' : `<form method=post action=/caso/${c.id}/etapa><input type=hidden name=etapa value=${k}><button class="p">Pasar a ${esc(n)}</button></form>`;
-        return `<div class="card paso" data-paso="${k}" style="${k === actual ? '' : 'display:none;'}margin-top:-4px"><div class="row" style="justify-content:space-between"><b style="font-size:16px">${esc(n)}</b>${mover}</div>
+        return `<div class="card paso" data-paso="${k}" style="${k === actual && !accionesPara(c).length ? '' : 'display:none;'}margin-top:-4px"><div class="row" style="justify-content:space-between"><b style="font-size:16px">${esc(n)}</b>${mover}</div>
           <p style="margin-top:6px">${esc(GUIA[k] || '')}</p>${extraEtapa(k)}${hist.length ? `<div class=mut style="margin-top:8px;font-size:13px">${hist.map(a => `${fecha(a.creada)} · ${esc(a.quien)}: ${esc(a.texto)}`).join('<br>')}</div>` : ''}</div>`;
       };
       return `<style>.bar button.et{all:unset;display:block;width:100%;height:100%;cursor:pointer;text-align:center;box-sizing:border-box}.bar>div:has(button.et):hover,.bar>div.sel{outline:2px solid var(--coral);outline-offset:-2px}</style>
@@ -144,7 +144,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
           ${[...ks].reverse().map(k => { const ESTV = { borrador: ['En armado', '#FFF3D6', '#8A5A00'], mandada: ['Mandada', '#E3EEF7', 'var(--azul)'], aceptada: ['Aceptada ✓', '#E0F0E6', 'var(--verde)'], reemplazada: ['Reemplazada', '#F1F1F1', '#7A848C'], no_eligio: ['No eligió', '#F1F1F1', '#7A848C'] }[k.estado] || [k.estado, '#F1F1F1', '#5A6670'];
             const viejo = ['reemplazada', 'no_eligio'].includes(k.estado);
             return `<div class="row" style="justify-content:space-between;padding:12px 14px;border:2px solid ${k.estado === 'borrador' ? '#F2D79B' : '#F0E6E1'};border-radius:12px;margin-top:8px;background:#fff${viejo ? ';opacity:.6' : ''}">
-            <span class=row style="gap:12px"><span style="font-size:18px;font-weight:800;color:var(--azul)">Versión ${k.version}</span><span class=chip style="background:${ESTV[1]};color:${ESTV[2]}">${ESTV[0]}</span><span><b>${dinero(k.precio_pp ?? (totales(k.items || []).precio || null), k.moneda)}</b> <span class=mut>por persona${k.valida_hasta ? ' · válida hasta ' + fecha(k.valida_hasta) : ''}${k.mandada ? ' · mandada el ' + fecha(k.mandada) + (k.mandada_por ? ' por ' + esc(k.mandada_por) : '') : ''}</span></span></span>
+            <span class=row style="gap:12px"><span style="font-size:18px;font-weight:800;color:var(--azul)">Versión ${k.version}</span><span class=chip style="background:${ESTV[1]};color:${ESTV[2]}">${ESTV[0]}</span><span><b>${dinero(k.precio_pp ?? (totales(k.items || []).precio || null), k.moneda)}</b> <span class=mut>por persona${k.valida_hasta ? ' · válida hasta ' + fecha(k.valida_hasta) : ''}${k.mandada ? ' · mandada el ' + fecha(k.mandada) + (k.mandada_por ? (k.mandada_por === 'a mano' ? ' a mano' : ' por ' + esc(k.mandada_por)) : '') : ''}</span></span></span>
             <span class=row style="gap:6px"><a class=btn href="/cotizacion/${k.id}/propuesta">👁 Ver</a>${k.estado === 'borrador' ? `<a class="btn p" href="/destino/${d.id}/cotizar">✎ Editar</a>` : ''}</span></div>`; }).join('')}</div>` : ''}
         ${d.semaforo === 'rojo' && !cerrado && c.fase === 'lead' ? `<form method=post action=/destino/${d.id}/respuesta-estandar style="margin-top:8px"><button class="p">Armar la respuesta estándar</button> <span class=mut>Explica que cuidamos la calidad y propone más presupuesto, menos días u otro destino.</span></form>` : ''}
         <div class="row" style="margin-top:10px">${boton}${!cerrado && c.fase === 'lead' ? `<form method=post action=/destino/${d.id}/descartar><button>Descartar</button></form>` : ''}
@@ -206,18 +206,35 @@ module.exports = function (app, { wrap, page, log, hace }) {
       ${MOTIVOS.map(m => `<button name=motivo value="${esc(m)}" style="text-align:left">${esc(m)}</button>`).join('')}
       <span class=mut style="padding:2px 6px;font-size:12px">Cuenta en la conversión. Si no era una consulta, usá Filtrar.</span></form></details>` : '';
     const wa = c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : '';
-    const sena = c.fase === 'oportunidad' ? (() => { const k = cots.find(x => x.estado === 'aceptada'); return k ? `<div class="card"><h2>Seña</h2><p>${esc(nombreDest(k.destino_id))} · v${k.version} · ${dinero(k.precio_pp, k.moneda)} por persona. Seña ${k.sena_pct ?? 50}%: <b>${dinero(plata(k.precio_pp * (k.sena_pct ?? 50) / 100), k.moneda)} por persona</b>${k.valida_hasta ? ` · tarifa válida hasta ${fecha(k.valida_hasta)}` : ''}.</p><p class=mut>${c.etapa === 'falta_sena' ? (c.sena_seguimiento_en ? 'Ya se le mandó el mensaje. Si no contesta en 3 días, pasa a Perdido.' : `Si en 3 días no llega la seña, se arma un solo mensaje para preguntarle si sigue${c.datos_sena_en ? ' (' + fecha(new Date(new Date(c.datos_sena_en).getTime() + 3 * 864e5)) + ')' : ''}.`) : 'Cuando le mandes los datos, tocá "Ya le mandé los datos de la seña".'}</p></div>` : ''; })() : '';
+    const sena = c.fase === 'oportunidad' && c.etapa !== 'le_intereso' ? (() => { const k = cots.find(x => x.estado === 'aceptada'); return k ? `<div class="card"><h2>Seña</h2><p>${esc(nombreDest(k.destino_id))} · v${k.version} · ${dinero(k.precio_pp, k.moneda)} por persona. Seña ${k.sena_pct ?? 50}%: <b>${dinero(plata(k.precio_pp * (k.sena_pct ?? 50) / 100), k.moneda)} por persona</b>${k.valida_hasta ? ` · tarifa válida hasta ${fecha(k.valida_hasta)}` : ''}.</p><p class=mut>${c.etapa === 'falta_sena' ? (c.sena_seguimiento_en ? 'Ya se le mandó el mensaje. Si no contesta en 3 días, pasa a Perdido.' : `Si en 3 días no llega la seña, se arma un solo mensaje para preguntarle si sigue${c.datos_sena_en ? ' (' + fecha(new Date(new Date(c.datos_sena_en).getTime() + 3 * 864e5)) + ')' : ''}.`) : 'Cuando le mandes los datos, tocá "Ya le mandé los datos de la seña".'}</p></div>` : ''; })() : '';
+    // el próximo paso, bien a la vista: qué hay que hacer en esta etapa y el botón para hacerlo
+    let proximo = '';
+    const kAcept = cots.find(x => x.estado === 'aceptada');
+    if (c.fase === 'oportunidad' && c.etapa === 'le_intereso' && kAcept) {
+      const M = await reglas.mensajes(), pct = kAcept.sena_pct ?? 50, senaPP = plata(kAcept.precio_pp * pct / 100);
+      const personas = String(c.cuantos || '').match(/\d+/g)?.reduce((a, x) => a + Number(x), 0) || 1;
+      const texto = reglas.completar(M.datos_sena, { nombre: reglas.primerNombre(c.nombre), destino: nombreDest(kAcept.destino_id), sena: dinero(senaPP, kAcept.moneda) + ' por persona', total_sena: dinero(senaPP * personas, kAcept.moneda), vence: kAcept.valida_hasta ? fecha(kAcept.valida_hasta) : 'la fecha indicada' });
+      const enviarPor = chat?.puede ? `<button class="p" name=enviar value=1>Mandar por ${chat.nombre} → Falta la seña</button>` : '';
+      proximo = `<div class="card" style="border:2px solid var(--verde)"><div class="row" style="justify-content:space-between"><h2 style="margin:0">👉 Próximo paso: mandarle los datos para la seña</h2><span class="chip ve">Le interesó</span></div>
+        <p style="margin-top:8px">${esc(nombreDest(kAcept.destino_id))} · versión ${kAcept.version} · ${dinero(kAcept.precio_pp, kAcept.moneda)} por persona. Seña ${pct}%: <b>${dinero(senaPP, kAcept.moneda)} por persona</b>${personas > 1 ? ` (${dinero(senaPP * personas, kAcept.moneda)} en total, ${personas} personas)` : ''}${kAcept.valida_hasta ? ` · la tarifa vale hasta el ${fecha(kAcept.valida_hasta)}` : ''}.</p>
+        <form method=post action=/caso/${c.id}/datos_sena style="margin-top:10px"><label>Mensaje con los datos (revisalo antes de mandarlo)</label><textarea name=texto id=msg_sena rows=7>${esc(texto)}</textarea>
+        ${/completar/i.test(texto) ? '<p class="aviso rojo" style="margin-top:6px">Faltan los datos de la cuenta: cargalos una vez en Ajustes → Mensajes ("Datos para la seña") y quedan para siempre.</p>' : ''}
+        <div class=row style="margin-top:8px;gap:8px">${enviarPor}<button type=button onclick="navigator.clipboard.writeText(document.getElementById('msg_sena').value);this.textContent='Copiado ✓'">Copiar mensaje</button>${c.whatsapp ? `<a class=btn target=_blank rel=noopener href="https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}?text=" onclick="this.href='https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}?text='+encodeURIComponent(document.getElementById('msg_sena').value)">Abrir WhatsApp con el mensaje ↗</a>` : ''}
+        <button class="${enviarPor ? '' : 'p'}">Ya le mandé los datos → Falta la seña</button></div>
+        <p class=mut style="margin-top:6px">Si en 3 días no llega la seña, se arma solo un mensaje para preguntarle si sigue.</p></form></div>`;
+    } else if (acc) {
+      proximo = `<div class="card" style="border:2px solid var(--verde)"><h2 style="margin:0">👉 Próximo paso</h2><p style="margin:6px 0 10px">${esc(GUIA[c.etapa] || '')}</p><div class="row">${acc}</div></div>`;
+    }
     const faltaSalida = c.fase === 'venta' && !c.sale && ['reservando', 'saldo'].includes(c.etapa) ? '<div class="aviso">Cargá la fecha de salida (abajo, en "Sale") para que lleguen solos los avisos del saldo, 2 meses y 1 mes antes.</div>' : '';
     const recotizando = c.fase === 'lead' && c.etapa === 'recotizar' ? '<div class="aviso">↻ Confirmó, pero cambió el precio: cargá la tarifa nueva en el cotizador y la fecha de validez, y mandala.</div>' : '';
 
-    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}${subtabs(c, ds, cots, 'ficha')}
+    page(req, res, c.nombre, `<div class="row" style="justify-content:space-between"><div><div class=mut>${FASES[c.fase].nombre}${c.viene_de ? ` · viene de <a href="/caso/${c.viene_de}">otra consulta</a>` : ''}</div><h1>${esc(c.nombre)}</h1></div><div class="row">${igBtn}${wa}${c.fase === 'lead' ? require('./conversaciones').BOTON_FILTRAR(c.id) : ''}${baja}<a class="btn" href="/persona/${c.persona_id}">Ver persona</a><form method=post action=/caso/${c.id}/nueva-consulta><button>+ Otro viaje de esta persona</button></form></div></div>${bar}${subtabs(c, ds, cots, 'ficha')}${proximo}
     ${otras.length ? `<div class="aviso">Esta persona tiene ${otras.length} consulta${otras.length > 1 ? 's' : ''} más abierta${otras.length > 1 ? 's' : ''}: ${otras.map(o => `<a href="/caso/${o.id}">${esc(o.destino || 'consulta')} (${esc(FASES[o.fase].etapas[o.etapa] || o.etapa)})</a>`).join(', ')}</div>` : ''}
     ${avisos.map(a => `<div class="aviso"><span>${esc(a.texto)} <span class=mut>(${fecha(a.para)})</span></span><form method=post action=/aviso/${a.id}/hecho><button>Listo</button></form></div>`).join('')}
     ${c.etapa === 'cotizando' && c.cotizando_por ? `<div class="aviso">⏱ Cotizando: ${esc(c.cotizando_por)} · ${hace(c.cotizando_desde)}</div>` : ''}
     ${c.origen === 'Demo' && c.fase === 'lead' && c.etapa === 'aguardando' && !c.borrador ? `<div class="aviso" style="background:#E3EEF5"><span><b>Consulta de prueba.</b> Simulá que el cliente contesta las preguntas para ver qué hace la IA.</span><form method=post action=/demo/${c.id}/responder><button class="p">Simular la respuesta del cliente</button></form></div>` : ''}
     ${c.origen === 'Demo' ? '<div class="mut" style="margin-bottom:8px">🧪 Consulta de prueba: los mensajes no salen a Instagram.</div>' : ''}
     ${req.query.falta ? '<div class="aviso rojo">Para pasar a Para cotizar primero hay que completar los datos que faltan. Están marcados abajo, en "Lo que vale para toda la consulta".</div>' : ''}${faltaSalida}${recotizando}${borrador}${respuesta}${sena}
-    ${acc ? `<div class="card"><div class="row">${acc}</div></div>` : ''}
     ${destinosHtml}
     ${hilo}
     <div class="grid"><div class="card" id=datos style="grid-column:1/-1"><h2>Lo que vale para toda la consulta</h2>${faltaHtml}<form method=post action=/caso/${c.id}/datos class="f" style="margin-top:8px">
@@ -453,7 +470,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
   }));
 
   const marcarMandada = async (req, kk, c, d, por = 'a mano') => {
-    const como = ' por ' + por;
+    const como = por === 'a mano' ? ' a mano' : ' por ' + por;
     if (kk.precio_pp == null && (kk.items || []).length) { const t = totales(kk.items); kk = await one('update cotizaciones set costo_pp=$1, precio_pp=$2, margen=$3 where id=$4 returning *', [t.costo, t.precio, t.pct, kk.id]); }
     const k = kk;
     await q(`update cotizaciones set estado='reemplazada' where destino_id=$1 and estado='mandada' and id<>$2`, [k.destino_id, k.id]);
@@ -491,7 +508,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const envio = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${borrador ? 'Mandársela' : 'Volver a mandársela'}</h2>${chat ? `<span class=mut>Escribió por ${chat.nombre}${chat.ventana ? '' : ' hace más de 24 h (no se puede mandar desde el CRM)'}</span>` : ''}</div>
       <div class=row style="margin-top:10px;gap:8px;flex-wrap:wrap">${opciones}</div>
       ${!wa || !ig || !c.mail ? `<p class=mut style="margin-top:8px">${!wa && !ig && !c.mail ? 'Este lead no tiene WhatsApp, Instagram ni mail cargados' : 'Falta cargar ' + [!wa && 'WhatsApp', !ig && 'Instagram', !c.mail && 'mail'].filter(Boolean).join(', ')}: <a href="/persona/${c.persona_id}">cargalos en la persona</a> y aparece el botón para mandarlo por ahí.</p>` : ''}
-      ${borrador ? `<form method=post action=/cotizacion/${k.id}/mandar class=row style="margin-top:10px;gap:8px;align-items:center"><input type=hidden name=como value=manual><span class=mut>¿La mandaste por WhatsApp, Instagram, mail o el PDF desde afuera?</span><button>Ya la mandé → Esperando respuesta</button></form>` : `<p style="margin-top:8px"><b>✓ Esta versión ya se mandó${k.mandada ? ' el ' + fecha(k.mandada) : ''}${k.mandada_por ? ' por ' + esc(k.mandada_por) : ''}.</b> <span class=mut>Si la volvés a mandar, queda registrado.</span></p>`}</div>`;
+      ${borrador ? `<form method=post action=/cotizacion/${k.id}/mandar class=row style="margin-top:10px;gap:8px;align-items:center"><input type=hidden name=como value=manual><span class=mut>¿La mandaste por WhatsApp, Instagram, mail o el PDF desde afuera?</span><button>Ya la mandé → Esperando respuesta</button></form>` : `<p style="margin-top:8px"><b>✓ Esta versión ya se mandó${k.mandada ? ' el ' + fecha(k.mandada) : ''}${k.mandada_por ? (k.mandada_por === 'a mano' ? ' a mano' : ' por ' + esc(k.mandada_por)) : ''}.</b> <span class=mut>Si la volvés a mandar, queda registrado.</span></p>`}</div>`;
     page(req, res, 'Propuesta ' + (d?.nombre || ''), `<div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1>${barraLinks(c)}${subtabs(c, ds, cots, 'p' + k.id)}
       <div class="row" style="justify-content:space-between;margin:6px 0 10px"><h2 style="margin:0">${esc(d?.nombre || k.viaje || '')} · propuesta v${k.version}${k.estado === 'borrador' ? ' <span class=chip>borrador</span>' : ''}</h2>
       <span class=row>${k.estado === 'borrador' && d ? `<a class="btn p" href="/destino/${d.id}/cotizar">✎ Seguir editando</a>` : ''}<a class=btn href="/c/${k.token}" target=_blank rel=noopener>Abrir aparte ↗</a></span></div>
@@ -572,6 +589,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     if (req.body.tipo === 'si') {
       await q(`update cotizaciones set estado='aceptada', resultado='vendió' where id=$1`, [k.id]);
       await q(`update destinos set estado='eligio' where id=$1`, [k.destino_id]);
+      await q(`update cotizaciones set estado='reemplazada' where destino_id=$1 and estado='borrador'`, [k.destino_id]);
       const otros = await q(`select * from destinos where caso_id=$1 and id<>$2 and estado not in ('descartado','eligio')`, [c.id, k.destino_id]);
       if (c.tipo_destinos === 'distintos' && otros.length) { // otro viaje: se separa solo en una consulta nueva
         const n = await one(`insert into casos(persona_id,cuantos,salida,presupuesto,confirma,servicio,destino,etapa,viene_de) values($1,$2,$3,$4,$5,$6,$7,'para_cotizar',$8) returning id`, [c.persona_id, c.cuantos, c.salida, c.presupuesto, c.confirma, c.servicio, otros.map(o => o.nombre).join(' / '), c.id]);

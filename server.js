@@ -110,9 +110,16 @@ app.post('/caso/:id/:accion', wrap(async (req, res, next) => {
   const a = ACCIONES[req.params.accion]; if (!a) return next();
   const c = await one('select * from casos where id=$1', [req.params.id]);
   if (!c || `${c.fase}.${c.etapa}` !== a.desde) return res.redirect('/caso/' + req.params.id);
+  if (req.params.accion === 'datos_sena' && req.body.enviar) { // mandarlo desde el CRM por el chat del cliente
+    try { await require('./src/canales').enviar(c.id, String(req.body.texto || '').trim()); }
+    catch (e) { await log(c.id, 'CRM', 'No se pudieron mandar los datos de la seña: ' + e.message); return res.redirect('/caso/' + c.id); }
+  }
   await q('update casos set fase=$1, etapa=$2, actualizado=now() where id=$3', [...a.a, c.id]);
   await log(c.id, req.session.quien, a.log);
-  if (req.params.accion === 'datos_sena') await q('update casos set datos_sena_en=now(), sena_seguimiento_en=null where id=$1', [c.id]);
+  if (req.params.accion === 'datos_sena') {
+    await q('update casos set datos_sena_en=now(), sena_seguimiento_en=null where id=$1', [c.id]);
+    await q(`update avisos set hecho=true where caso_id=$1 and not hecho and texto ilike '%datos para la seña%'`, [c.id]);
+  }
   if (a.pago) {
     const medio = MEDIOS.includes(req.body.medio) ? req.body.medio : MEDIOS[0], pide = PIDE_COMPROBANTE.includes(medio);
     const monto = Number(String(req.body.monto || '').replace(/\./g, '').replace(',', '.')) || null;
