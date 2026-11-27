@@ -83,7 +83,8 @@ async function registrar({ igsid, username, nombre, mid, entrante, texto, cuando
   if (!ins || !c) return !!ins;
   await q('update casos set actualizado=now() where id=$1', [c.id]);
   const anotar = texto => q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [c.id, 'Instagram', texto]);
-  if (!entrante && c.fase === 'lead' && ['nuevo', 'preguntando'].includes(c.etapa) && conv.preguntoAlgo(texto, c)) { // les mandaron las preguntas (desde el CRM o desde Instagram)
+  if (!entrante && c.borrador_tipo === 'saludo') { await conv.saludoMandado(c, ins.id); await anotar('Se mandó el saludo.'); }
+  else if (!entrante && c.fase === 'lead' && ['nuevo', 'preguntando'].includes(c.etapa) && conv.preguntoAlgo(texto, c)) { // les mandaron las preguntas (desde el CRM o desde Instagram)
     await q(`update casos set etapa='aguardando', borrador=null, borrador_tipo=null, preguntas_en=coalesce(preguntas_en, now()) where id=$1`, [c.id]); await anotar('Le pidieron los datos por Instagram. Pasa a Aguardando datos.');
   } else if (!entrante && c.fase === 'lead' && c.etapa === 'aguardando' && ['recordatorio', 'repregunta'].includes(c.borrador_tipo)) {
     const rec = c.borrador_tipo === 'recordatorio';

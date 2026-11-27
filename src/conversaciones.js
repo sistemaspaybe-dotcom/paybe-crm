@@ -34,12 +34,42 @@ function esRuido(texto) {
   return (historia && sinAdjuntos.length <= 60) || (sinAdjuntos.length <= 30 && REACCION.test(sinAdjuntos));
 }
 
+// ¿escribió solo un saludo? ("Hola!", "Buenas tardes", "hola, ¿cómo estás?") → se le contesta solo con el saludo armado
+const PALABRAS_SALUDO = new Set(['hola', 'holis', 'holi', 'buenas', 'buen', 'buenos', 'buena', 'dia', 'dias', 'tardes', 'noches', 'que', 'tal', 'como', 'estas', 'esta', 'va', 'hey', 'hi', 'hello', 'saludos', 'todo', 'bien']);
+const ABRE_SALUDO = /^(hol[aiy]s?|buen[oa]?s?|hey|hi|hello|saludos)$/;
+function esSaludo(texto) {
+  const t = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ').replace(/(.)\1+/g, '$1').trim();
+  const w = t.split(/\s+/).filter(Boolean);
+  return w.length > 0 && w.length <= 6 && ABRE_SALUDO.test(w[0]) && w.every(x => PALABRAS_SALUDO.has(x) || ABRE_SALUDO.test(x));
+}
+// manda el saludo por el canal por el que escribió. Si no se puede (o está apagada la respuesta automática), queda armado para mandarlo a mano
+async function saludar(casoId) {
+  const c = await one('select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.id=$1', [casoId]);
+  if (!c || c.fase !== 'lead' || c.etapa !== 'nuevo') return;
+  if (await one('select 1 from mensajes where caso_id=$1 and not entrante limit 1', [casoId])) return; // ya le contestaron
+  const texto = (await require('./reglas').mensajes()).saludo;
+  await q(`update casos set borrador=$1, borrador_tipo='saludo', borrador_en=now() where id=$2`, [texto, casoId]);
+  const auto = (await one(`select valor from ajustes where clave='auto_preguntas'`))?.valor !== 'no';
+  if (!auto) return q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [casoId, 'CRM', 'Solo saludó: quedó armado el saludo para mandarlo.']);
+  try {
+    const por = await require('./canales').enviar(casoId, texto, { auto: true });
+    await q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [casoId, 'CRM', `Solo saludó: se le mandó solo el saludo por ${por}. Cuando conteste, la IA sigue con las preguntas para cotizar.`]);
+  } catch (e) { await q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [casoId, 'CRM', 'No se pudo mandar solo el saludo: ' + e.message + '. Quedó armado para mandarlo a mano.']); }
+}
+// el saludo salió (desde el CRM o desde el celu): se marca como automático y se limpia el borrador
+async function saludoMandado(c, mensajeId) {
+  await q(`update casos set borrador=null, borrador_tipo=null where id=$1 and borrador_tipo='saludo'`, [c.id]);
+  if (mensajeId) await q(`update mensajes set auto='saludo' where id=$1`, [mensajeId]);
+  c.borrador_tipo = null;
+}
+
 // por qué se filtró (lo elige el equipo con el botón Filtrar; la regla y la IA ponen "No es una consulta")
 const MOTIVOS_FILTRO = { no_consulta: 'No es una consulta', proveedor: 'Proveedor u otra agencia', spam: 'Spam o publicidad' };
 // ¿la respuesta del equipo le pidió datos? Solo así el lead pasa a Aguardando datos.
 // Cuenta si mandaron las preguntas armadas, o si el mensaje pregunta algo; un "¡dale!" o un saludo no.
 function preguntoAlgo(texto, c) {
   const t = String(texto || '').trim();
+  if (c.borrador_tipo === 'saludo') return false; // el saludo automático no son las preguntas para cotizar
   if (c.borrador_tipo === 'preguntas' && c.borrador && t.slice(0, 40) === String(c.borrador).trim().slice(0, 40)) return true;
   // tiene que preguntar algo del viaje: "¿quién es el chico del cumple?" no cuenta
   return /[?¿]/.test(t) && /viaj|fecha|cu[aá]nd|cu[aá]nt|presupuesto|destino|sal[ei]n|d[ií]as|persona|adulto|menor|hotel|alojamiento|vuelo|a[eé]reo|categor|cotiz|propuesta/i.test(t);
@@ -69,7 +99,10 @@ async function crearLead(personaId, canal, quien, texto) {
   await q(`update conversaciones set cerrada=null, cerrada_en=null, cerrada_por=null where persona_id=$1`, [personaId]);
   await q(`update personas set origen=coalesce(origen,$2) where id=$1`, [personaId, (CANALES[canal] || [canal])[0]]);
   await q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [casoId, quien, texto]);
-  ia().programar(casoId);
+  // si solo saludó, se le contesta el saludo (sin esperar a la IA, que a un "Hola" solo lo mandaría a Filtrados)
+  const recibidos = ['Instagram', 'WhatsApp'].includes(quien) ? await q('select texto from mensajes where caso_id=$1 and entrante', [casoId]) : [];
+  if (recibidos.length && recibidos.every(m => esSaludo(m.texto))) ia().enCola(() => saludar(casoId), casoId); // en otra cola: no se espera acá
+  else ia().programar(casoId);
   return casoId;
 }
 
@@ -177,4 +210,4 @@ async function limpiarViejos() {
   await q("insert into ajustes(clave,valor) values('migracion_filtro_2611', now()::text)");
 }
 
-module.exports = { preguntoAlgo, BOTON_PERSONAL, BOTON_FILTRAR, MOTIVOS_FILTRO, tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };
+module.exports = { esSaludo, saludar, saludoMandado, preguntoAlgo, BOTON_PERSONAL, BOTON_FILTRAR, MOTIVOS_FILTRO, tocar, esRuido, filtrarConversacion, filtrarCaso, crearLead, estadoChat, chipChat, sinContestar, rutas, encabezado, limpiarViejos, CANALES, ESTADOS, icono };
