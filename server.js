@@ -151,8 +151,9 @@ app.post('/aviso/:id/hecho', wrap(async (req, res) => { await q('update avisos s
 
 // ---- alta de lead ----
 app.get('/nuevo', (req, res) => req.query.oficina ? page(req, res, 'Visita a la oficina', `<h1>Visita a la oficina</h1><p class=mut>Alguien vino a la agencia a consultar.</p><form class="card" method=post action=/nuevo><input type=hidden name=origen value="Oficina"><div class="f">
-<div><label>Nombre</label><input name=nombre required></div><div><label>WhatsApp</label><input name=whatsapp inputmode=tel></div>
+<div><label>Nombre</label><input name=nombre required></div><div><label>WhatsApp *</label><input name=whatsapp inputmode=tel required placeholder="Ej. 11 5555 5555"><span class=mut style="font-size:12px">Pedíselo siempre: por ahí le mandamos lo que hablaron.</span></div>
 <div style="grid-column:1/-1"><label>Qué busca</label><input name=destino placeholder="Ej. crucero por el Caribe en febrero"></div>
+<div style="grid-column:1/-1"><label>Notas de la reunión (pegá lo de Granola)</label><textarea name=notas rows=8 placeholder="Pegá acá las notas de Granola. La IA completa la ficha con lo que se habló y arma el mensaje de WhatsApp para mandarle."></textarea></div>
 <div><label>Quién la atendió</label><select name=atendio>${EQUIPO.map(n => `<option${n === req.session.quien ? ' selected' : ''}>${n}</option>`).join('')}</select></div></div>
 <p><button class="p">Crear lead</button></p></form>`, '/leads') : page(req, res, 'Agregar lead', `<h1>Agregar lead</h1><form class="card" method=post action=/nuevo><div class="f">
 <div><label>Nombre</label><input name=nombre required></div><div><label>WhatsApp</label><input name=whatsapp></div><div><label>Mail</label><input name=mail></div>
@@ -167,6 +168,13 @@ app.post('/nuevo', wrap(async (req, res) => {
   const c = await one('insert into casos(persona_id,destino,servicio,fechas,cuantos,presupuesto,atendio) values($1,$2,$3,$4,$5,$6,$7) returning id', [p.id, b.destino, b.servicio || null, b.fechas, b.cuantos, b.presupuesto, EQUIPO.includes(b.atendio) ? b.atendio : null]);
   if (b.origen === 'Oficina' && b.destino) await q('insert into destinos(caso_id,nombre) values($1,$2)', [c.id, b.destino]);
   await log(c.id, req.session.quien, b.origen === 'Oficina' ? `Lead creado: visita a la oficina${EQUIPO.includes(b.atendio) ? ', la atendió ' + b.atendio : ''}.` : `Lead creado (${b.origen}).`);
+  const notas = String(b.notas || '').trim();
+  if (notas) { // notas de la reunión (Granola): quedan en la ficha, la IA completa los datos y arma el mensaje de WhatsApp
+    await q('insert into chats(caso_id,texto,resumen) values($1,$2,$3)', [c.id, notas.slice(0, 20000), 'Notas de la visita a la oficina']);
+    await log(c.id, req.session.quien, 'Era una consulta: visita a la oficina con notas de la reunión.');
+    const ia = require('./src/ia');
+    if (ia.hayIA()) await ia.enCola(() => ia.visita(c.id), c.id);
+  }
   res.redirect('/caso/' + c.id);
 }));
 
