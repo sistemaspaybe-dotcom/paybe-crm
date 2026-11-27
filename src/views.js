@@ -43,7 +43,16 @@ label{font-size:12px;font-weight:600;color:#5A6670;display:block;margin-bottom:3
   .bar{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.bar::-webkit-scrollbar{display:none}
   .bar>div{flex:0 0 auto;min-width:96px}
   .etapas{display:flex !important;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.etapas::-webkit-scrollbar{display:none}
-  .etapas a{flex:0 0 128px}
+  .etapas{gap:6px !important;margin:8px -12px 0 !important;padding:0 12px}
+  .etapas a{flex:0 0 auto !important;padding:8px 12px !important;white-space:nowrap;font-size:13px !important;border-radius:999px !important}
+  .etapas a b{display:inline !important;font-size:15px !important;margin-right:6px}
+  .etapas a small{display:none !important}
+  .etapa-desc{display:block !important;font-size:13px;color:#5A6670;margin:6px 0 2px}
+  .segm{display:flex !important;width:100%}.segm a{flex:1;text-align:center;padding:8px 6px !important;font-size:13px}
+  /* filas de las listas: el canal chiquito arriba, en línea */
+  td:first-child svg{width:20px;height:20px}
+  td:first-child[title]{display:flex !important;gap:6px;align-items:center;text-align:left !important;width:auto}
+  td:first-child[title] div{margin:0 !important}
   .subtabs{flex-wrap:nowrap !important;overflow-x:auto}.subtabs .st{white-space:nowrap;flex:0 0 auto}
   .row{gap:6px}
   iframe{min-height:520px !important}
