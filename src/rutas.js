@@ -20,6 +20,13 @@ const tituloCaso = async c => {
   const k = canalDeCaso({ u_canal: u?.canal, origen: u?.origen }), [nom, col, bg] = CANALES[k];
   return `<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span title="Vino por ${nom}" style="display:inline-flex;transform:scale(1.25)">${LOGOS[k]}</span><h1 style="margin:0">${esc(c.nombre)}</h1><span class=chip style="background:${bg};color:${col};font-size:13px">Vino por ${nom}</span></div>`;
 };
+const CIERRES = { cierre: 'No contestó las preguntas', cierre_propuesta: 'No contestó la propuesta', sena: 'No pagó la seña (venció la tarifa)' };
+async function cerrarSiCorresponde(c, quien) {
+  const motivo = CIERRES[c.borrador_tipo]; if (!motivo || c.fase === 'baja') return;
+  await q(`update casos set fase='baja', etapa='baja', baja_desde=$2, motivo_baja=$3, actualizado=now() where id=$1`, [c.id, c.fase, motivo]);
+  await q('update avisos set hecho=true where caso_id=$1 and not hecho', [c.id]);
+  await q('insert into actividad(caso_id,quien,texto) values($1,$2,$3)', [c.id, quien || 'CRM', `Se cerró la consulta: ${motivo}. Pasa a Perdido.`]);
+}
 const SEM = { verde: ['🟢', 'Para cotizar', '#E0F0E6', '#1E5A3A'], amarillo: ['🟡', 'Tibio', '#FFF3D6', '#8A5A00'], rojo: ['🔴', 'No cotizar', '#FBE4E7', '#B84A53'] };
 const n2 = v => v === '' || v == null ? null : v;
 const plata = v => Math.round(Number(v) || 0);
@@ -131,12 +138,12 @@ module.exports = function (app, { wrap, page, log, hace }) {
     else bar = `<div class="aviso rojo">Perdido${c.baja_desde ? ' (en ' + esc(FASES[c.baja_desde]?.nombre || c.baja_desde) + ')' : ''}: ${esc(c.motivo_baja || '')}</div>`;
 
     // borrador de la IA
-    const etiquetaBorrador = { saludo: 'Solo saludó: saludo con lo que hace Paybe', preguntas: ia.hayIA() ? 'La IA armó un solo mensaje con todo lo que falta' : 'Preguntas para cotizar (sin IA: fijate que sea una consulta)', recordatorio: 'No contestó en 20 h: recordatorio (una sola vez)', seguimiento: 'Seguimiento de la cotización', repregunta: 'Contestó una parte: le pedimos lo que falta', presupuesto_bajo: 'Respuesta estándar: presupuesto bajo', sena: 'La seña no llegó: un solo mensaje', comprobante: 'Pedir el comprobante', saldo: 'Recordatorio del saldo', vence: 'Aviso: vence la tarifa de la cotización' }[c.borrador_tipo] || 'Borrador';
+    const etiquetaBorrador = { saludo: 'Solo saludó: saludo con lo que hace Paybe', cierre: '1.5 · 3 días sin respuesta: al mandarlo se cierra la consulta', cierre_propuesta: '2.2 · Propuesta sin respuesta: al mandarlo se cierra la consulta', listo: '1.3 · Ya dio todo para cotizar', sena_recibida: '3.3 · Recibimos tu seña', preguntas: ia.hayIA() ? 'La IA armó un solo mensaje con todo lo que falta' : 'Preguntas para cotizar (sin IA: fijate que sea una consulta)', recordatorio: 'No contestó en 20 h: recordatorio (una sola vez)', seguimiento: 'Seguimiento de la cotización', repregunta: 'Contestó una parte: le pedimos lo que falta', presupuesto_bajo: 'Respuesta estándar: presupuesto bajo', sena: '3.2 · Venció la tarifa sin seña: al mandarlo se cierra la consulta', comprobante: 'Pedir el comprobante', saldo: 'Recordatorio del saldo', vence: 'Aviso: vence la tarifa de la cotización' }[c.borrador_tipo] || 'Borrador';
     const chat = await canales.canalDe(c.id), puedeIG = !!chat?.puede;
     const borrador = c.borrador ? `<div class="card" style="border:2px solid var(--azul)"><span class="chip">${etiquetaBorrador} · revisalo y mandalo</span>
       <form method=post action=/caso/${c.id}/enviar style="margin-top:10px"><textarea name=texto id=borrador rows=${Math.min(14, 3 + (c.borrador.match(/\n/g) || []).length)}>${esc(c.borrador)}</textarea>
       <div class="row" style="margin-top:8px">${puedeIG ? `<button class="p" name=como value=chat>Enviar por ${chat.nombre}</button>` : `<button type=button onclick="navigator.clipboard.writeText(document.getElementById('borrador').value);this.textContent='Copiado ✓'">Copiar</button>${c.instagram_user ? `<a class="btn" target=_blank href="https://ig.me/m/${encodeURIComponent(c.instagram_user)}">Abrir Instagram</a>` : ''}${c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : ''}<button class="g" name=como value=manual>Ya lo mandé</button>`}
-      <button formaction=/caso/${c.id}/borrador/descartar>Lo contesto yo</button></div>
+      <button formaction=/caso/${c.id}/borrador/descartar>Lo contesto yo</button>${CIERRES[c.borrador_tipo] ? `<button formaction=/caso/${c.id}/cerrar-sin-mandar onclick="return confirm('¿Cerrar la consulta sin mandarle nada? Pasa a Perdido.')">Cerrar sin mandar</button>` : ''}</div>
       ${chat?.agente ? `<p class=mut>Pasaron más de 24 h, pero como lo mandás vos, Instagram deja responder hasta 7 días después de su último mensaje.</p>` : chat && !chat.puede ? `<p class=mut>Pasaron más de ${chat.canal === 'instagram' ? '7 días' : '24 h'} desde su último mensaje: ${chat.nombre} no deja mandarlo desde el CRM. Copialo y mandalo desde la app.</p>` : ''}</form></div>` : '';
 
     // qué contestó a la cotización
@@ -230,7 +237,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
       ${MOTIVOS.filter(m => m !== 'Otro').map(m => `<button name=motivo value="${esc(m)}" style="text-align:left">${esc(m)}</button>`).join('')}<span class=row style="gap:6px;flex-wrap:nowrap;padding:2px 0"><input name=otro placeholder="Otro: escribí por qué" style="min-width:180px"><button name=motivo value=Otro onclick="const i=this.form.otro;if(!i.value.trim()){i.focus();i.placeholder='Escribí el motivo';return false}">Otro</button></span>
       <span class=mut style="padding:2px 6px;font-size:12px">Cuenta en la conversión. Si no era una consulta, usá Filtrar.</span></form></details>` : '';
     const wa = c.whatsapp ? `<a class="btn" target=_blank href="https://wa.me/${esc(c.whatsapp.replace(/\D/g, ''))}">Abrir WhatsApp</a>` : '';
-    const sena = c.fase === 'oportunidad' && c.etapa !== 'le_intereso' ? (() => { const k = cots.find(x => x.estado === 'aceptada'); return k ? `<div class="card"><h2>Seña</h2><p>${esc(nombreDest(k.destino_id))} · v${k.version} · ${dinero(k.precio_pp, k.moneda)} por persona. Seña ${k.sena_pct ?? 50}%: <b>${dinero(plata(k.precio_pp * (k.sena_pct ?? 50) / 100), k.moneda)} por persona</b>${k.valida_hasta ? ` · tarifa válida hasta ${fecha(k.valida_hasta)}` : ''}.</p><p class=mut>${c.etapa === 'falta_sena' ? (c.sena_seguimiento_en ? 'Ya se le mandó el mensaje. Si no contesta en 3 días, pasa a Perdido.' : `Si en 3 días no llega la seña, se arma un solo mensaje para preguntarle si sigue${c.datos_sena_en ? ' (' + fecha(new Date(new Date(c.datos_sena_en).getTime() + 3 * 864e5)) + ')' : ''}.`) : 'Cuando le mandes los datos, tocá "Ya le mandé los datos de la seña".'}</p></div>` : ''; })() : '';
+    const sena = c.fase === 'oportunidad' && c.etapa !== 'le_intereso' ? (() => { const k = cots.find(x => x.estado === 'aceptada'); return k ? `<div class="card"><h2>Seña</h2><p>${esc(nombreDest(k.destino_id))} · v${k.version} · ${dinero(k.precio_pp, k.moneda)} por persona. Seña ${k.sena_pct ?? 50}%: <b>${dinero(plata(k.precio_pp * (k.sena_pct ?? 50) / 100), k.moneda)} por persona</b>${k.valida_hasta ? ` · tarifa válida hasta ${fecha(k.valida_hasta)}` : ''}.</p><p class=mut>${c.etapa === 'falta_sena' ? (c.sena_seguimiento_en ? 'Ya quedó armado el mensaje de cierre: al mandarlo, la consulta se cierra.' : `Si vence la tarifa sin la seña${k.valida_hasta ? ' (' + fecha(k.valida_hasta) + ')' : ''}, al día siguiente queda armado el mensaje de cierre.`) : 'Cuando le mandes los datos, tocá "Ya le mandé los datos de la seña".'}</p></div>` : ''; })() : '';
     // pasajeros de la venta, cada uno es una persona con sus documentos (quedan guardados para el próximo viaje)
     const DOC_TIPOS = ['Pasaporte', 'DNI', 'Visa', 'Certificado de vacunas', 'Partida de nacimiento', 'Autorización de viaje (menores)', 'Otro'];
     const esperados = String(c.cuantos || '').match(/\d+/g)?.reduce((a, x) => a + Number(x), 0) || 0;
@@ -261,7 +268,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
         ${/completar/i.test(texto) ? '<p class="aviso rojo" style="margin-top:6px">Faltan los datos de la cuenta: cargalos una vez en Ajustes → Mensajes ("Datos para la seña") y quedan para siempre.</p>' : ''}
         <div class=row style="margin-top:8px;gap:8px">${enviarPor}<button type=button onclick="navigator.clipboard.writeText(document.getElementById('msg_sena').value);this.textContent='Copiado ✓'">Copiar mensaje</button>${c.whatsapp ? `<a class=btn target=_blank rel=noopener href="https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}?text=" onclick="this.href='https://wa.me/${esc(String(c.whatsapp).replace(/\D/g, ''))}?text='+encodeURIComponent(document.getElementById('msg_sena').value)">Abrir WhatsApp con el mensaje ↗</a>` : ''}
         <button class="${enviarPor ? '' : 'p'}">Ya le mandé los datos → Falta la seña</button></div>
-        <p class=mut style="margin-top:6px">Si en 3 días no llega la seña, se arma solo un mensaje para preguntarle si sigue.</p></form></div>`;
+        <p class=mut style="margin-top:6px">Si vence la tarifa sin la seña, queda armado el mensaje de cierre.</p></form></div>`;
     } else if (c.fase === 'venta' && c.etapa === 'pedir_docs') {
       const M = await reglas.mensajes();
       const texto = reglas.completar(M.pedir_docs, { nombre: reglas.primerNombre(c.nombre), destino: ds.find(d => d.estado === 'eligio')?.nombre || c.destino || 'el viaje' });
@@ -387,7 +394,14 @@ module.exports = function (app, { wrap, page, log, hace }) {
       await log(c.id, req.session.quien, 'Mensaje mandado a mano' + (c.borrador_tipo === 'preguntas' ? '. Pasa a Aguardando datos.' : '.'));
     }
     await q('update casos set borrador=null, borrador_tipo=null, actualizado=now() where id=$1', [c.id]);
+    await cerrarSiCorresponde(c, req.session.quien);
     res.redirect('/caso/' + c.id);
+  }));
+  // los mensajes de cierre (1.5, 2.2, 3.2): al mandarlos, la consulta pasa a Perdido. También se puede cerrar sin mandar nada.
+  app.post('/caso/:id/cerrar-sin-mandar', wrap(async (req, res) => {
+    const c = await one('select * from casos where id=$1', [req.params.id]);
+    if (c && CIERRES[c.borrador_tipo]) { await q('update casos set borrador=null, borrador_tipo=null where id=$1', [c.id]); await cerrarSiCorresponde(c, req.session.quien); }
+    res.redirect('/caso/' + req.params.id);
   }));
   app.post('/caso/:id/borrador/descartar', wrap(async (req, res) => {
     await q('update casos set borrador=null, borrador_tipo=null where id=$1', [req.params.id]);
@@ -549,7 +563,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     await log(c.id, req.session.quien, `Cotización de ${d?.nombre} v${kk.version} mandada${como} (${dinero(kk.precio_pp, kk.moneda)} pp). Se armó en ${min} min.${c.fase === 'lead' && !pendientes.n ? ' Pasa a Esperando respuesta.' : ''}`);
     if (kk.valida_hasta) await q(`insert into avisos(caso_id,para,texto) values($1,$2::date - 1,$3)`, [c.id, kk.valida_hasta, `Mañana vence la tarifa de ${d?.nombre}`]);
   };
-  const textoPropuesta = (c, d, link) => `¡Hola ${String(c.nombre || '').replace(/^@/, '').split(' ')[0]}! Te paso la propuesta para ${d?.nombre || 'tu viaje'} 👇\n${link}\nCualquier duda o si querés ajustar algo, escribinos por acá.`;
+  const textoPropuesta = (c, d, link, k, M) => reglas.completar(M.propuesta, { nombre: reglas.primerNombre(c.nombre), destino: d?.nombre || 'tu viaje', vence: k?.valida_hasta ? reglas.diaMes(k.valida_hasta) : 'la fecha que figura en la propuesta', link });
 
   // la propuesta como subpestaña dentro del CRM (se ve tal cual la ve el cliente)
   app.get('/cotizacion/:id/propuesta', wrap(async (req, res) => {
@@ -559,7 +573,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const d = await one('select * from destinos where id=$1', [k.destino_id]);
     const [ds, cots] = await Promise.all([q('select * from destinos where caso_id=$1 order by id', [c.id]), q('select * from cotizaciones where caso_id=$1 order by destino_id, version, id', [c.id])]);
     const link = `${req.protocol}://${req.get('host')}/c/${k.token}`;
-    const chat = await canales.canalDe(c.id), texto = textoPropuesta(c, d, link), borrador = k.estado === 'borrador';
+    const chat = await canales.canalDe(c.id), texto = textoPropuesta(c, d, link, k, await reglas.mensajes()), borrador = k.estado === 'borrador';
     const wa = String(c.whatsapp || chat?.canal === 'whatsapp' && chat.destino || '').replace(/\D/g, '');
     const ig = c.instagram_user || '';
     const copiar = `navigator.clipboard.writeText(${esc(JSON.stringify(texto))});`;
@@ -606,7 +620,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const c = await one('select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.id=$1', [kk.caso_id]);
     const d = await one('select * from destinos where id=$1', [kk.destino_id]);
     if (req.body.como === 'chat') {
-      try { await canales.enviar(c.id, textoPropuesta(c, d, `${req.protocol}://${req.get('host')}/c/${kk.token}`)); }
+      try { await canales.enviar(c.id, textoPropuesta(c, d, `${req.protocol}://${req.get('host')}/c/${kk.token}`, kk, await reglas.mensajes())); }
       catch (e) { await log(c.id, 'CRM', 'No se pudo mandar la propuesta: ' + e.message); return res.redirect(`/cotizacion/${kk.id}/propuesta`); }
     }
     const por = req.body.como === 'chat' ? (await canales.canalDe(c.id))?.nombre || 'chat' : 'a mano';
@@ -638,7 +652,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     const d = await one('select * from destinos where id=$1', [k.destino_id]);
     const link = `${req.protocol}://${req.get('host')}/c/${kk.token}`;
     if (accion === 'mandar_chat') {
-      const texto = textoPropuesta(c, d, link);
+      const texto = textoPropuesta(c, d, link, kk, await reglas.mensajes());
       try { await canales.enviar(c.id, texto); }
       catch (e) { await log(c.id, 'CRM', 'No se pudo mandar la propuesta: ' + e.message); return res.redirect(`/destino/${k.destino_id}/cotizar`); }
     }

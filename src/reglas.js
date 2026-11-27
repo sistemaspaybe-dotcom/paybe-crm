@@ -26,20 +26,29 @@ const DEFAULTS = {
   cortes: { verde: 100, rojo: 75, alta: 20, mesesAlta: [12, 1, 7] },
   // mensajes armados (24/11). {nombre}, {destino}, {minimo}, {medio} se reemplazan solos
   mensajes: {
+    listo: '¡Muchas gracias, {nombre}! Con esto ya te puedo armar la cotización de {destino}. Te la mando en las próximas 48 h y me contás cómo la ves 🙌',
+    cierre_consulta: '¡Hola {nombre}! Como no tuvimos noticias tuyas, por ahora cerramos tu consulta de {destino}. Cuando quieras retomarla, escribinos por acá y te armamos la propuesta. ¡Gracias por pensar en Paybe!',
+    propuesta: '¡Hola {nombre}! Te paso la propuesta para {destino} 🌴 La armamos con todo lo que nos contaste. El precio está congelado hasta el {vence}: después de esa fecha, los aéreos y los hoteles pueden cambiar de tarifa. Miralo tranqui y contame qué te parece. Si querés ajustar algo, lo cambiamos sin problema.\n{link}',
+    seguimiento_propuesta: '¡Hola {nombre}! ¿Pudiste ver la propuesta? Te recuerdo que el precio está congelado hasta el {vence}. Si algo no te cerró o querés cambiar algo (fechas, hotel, presupuesto), decinos y lo rearmamos. Si no, por ahora cerramos la consulta y cuando quieras la retomamos. ¡Gracias!',
+    datos_sena: '¡Genial, {nombre}! Seguimos adelante 🙌 Te cuento cómo trabajamos en Paybe:\n1. Para confirmar el viaje se abona una seña del 50% ({total_sena} en total). Con la seña empezamos a reservar todo.\n2. El otro 50% lo pagás como te quede más cómodo, en las cuotas que quieras. Lo único importante es que el viaje quede pagado 30 días antes de la salida.\nTe paso los datos para transferir:\nAlias: COMPLETAR EN AJUSTES\nCBU: COMPLETAR EN AJUSTES\nTitular: Paybe Turismo\nCuando la hagas, mandanos el comprobante por acá y arrancamos con las reservas. Acordate que el precio está congelado hasta el {vence}.',
+    sena: '¡Hola {nombre}! Te cuento que ayer venció el plazo de la tarifa de {destino}, así que por ahora cerramos tu pedido. Si te sigue interesando, avisanos y te recotizamos con los precios actualizados. ¡Gracias!',
+    sena_recibida: '¡Recibimos tu seña, {nombre}! Muchas gracias 🙌 Ya empezamos a reservar todo para {destino}. Acordate que el resto lo podés pagar como prefieras, en las cuotas que quieras, hasta {saldo_hasta}. Cualquier duda, acá estamos.',
+    saldo_60: '¡Genial, {nombre}! Ya faltan solo dos meses para {destino} 🌴 Te recordamos que el saldo se completa hasta {saldo_hasta}. Si querés, te armamos las cuotas que te queden más cómodas para el último mes.',
+    saldo_30: '¡Hola {nombre}! Falta un mes para {destino} 🙌 Hoy es el último día para completar el saldo, así dejamos todas las reservas confirmadas. ¿Lo coordinamos?',
     saludo: '¡Hola! Gracias por escribirnos 😊 Contanos en qué te podemos ayudar y te armamos la cotización. En Paybe hacemos:\n• Viajes a medida\n• Salidas grupales\n• Aéreos\n• Hoteles\n• Visas\n• Alquiler de autos\n• Asistencia al viajero\n\n¿Qué viaje estás pensando?',
     presupuesto_bajo: '¡Hola {nombre}! Gracias por escribirnos 😊 En Paybe cuidamos mucho la calidad de cada viaje (hoteles, traslados, asistencia y que todo salga bien), y para {destino} en esas fechas eso arranca en {minimo} por persona. Te proponemos tres caminos: sumar un poco al presupuesto, hacerlo con menos días, o pensar otro destino que con lo que tenés en mente te dé un viajazo. ¿Cuál te cierra más?',
-    sena: '¡Hola {nombre}! ¿Cómo va? Te escribo para saber si siguen con la idea de {destino}. Las tarifas tienen validez limitada, así que si quieren avanzar avisanos y lo reservamos.',
-    datos_sena: '¡Qué bueno, {nombre}! 🙌 Para reservar {destino} se abona una seña de {sena} ({total_sena} en total). Te paso los datos para transferir:\nAlias: COMPLETAR EN AJUSTES\nCBU: COMPLETAR EN AJUSTES\nTitular: Paybe Turismo\nCuando la hagas, mandanos el comprobante por acá y reservamos todo. La tarifa vale hasta el {vence}.',
     pedir_docs: '¡Hola {nombre}! 🙌 Ya estamos con la reserva de {destino}. Para avanzar necesitamos de cada pasajero:\n• Nombre y apellido tal como figuran en el pasaporte\n• Fecha de nacimiento\n• Foto del pasaporte (vigente al menos 6 meses después de la vuelta) o del DNI si viajan por la región\n• Si viajan menores: partida de nacimiento y autorización de viaje si no viajan con ambos padres\n• Un mail y un teléfono de contacto\nPodés mandarnos todo por acá. ¡Gracias!',
     comprobante: '¡Hola {nombre}! Gracias por el pago 🙌 ¿Nos mandás el comprobante de la {medio} así lo dejamos registrado?',
-    saldo_60: '¡Hola {nombre}! Ya falta poco para {destino} ✈️ Te recordamos que el saldo del viaje se completa hasta 30 días antes de la salida: queda el último mes. Cualquier duda, escribinos.',
-    saldo_30: '¡Hola {nombre}! Faltan 30 días para {destino}. Hoy vence el plazo del saldo: sin el pago se pierden las reservas. ¿Lo coordinamos?',
   },
   // borrador con lo que dijo Sol (24/11): que lo lea ella antes de que salga en las propuestas
   bases: 'Para reservar se abona una seña del 50% del total. El saldo se completa hasta 30 días antes de la salida; sin ese pago se pierden las reservas. Los aéreos son intransferibles y, una vez emitidos, no tienen devolución; cualquier cambio está sujeto a penalidad y a la diferencia de tarifa. Los hoteles se reservan con tarifa cancelable según las condiciones de cada uno. Las tarifas están sujetas a disponibilidad hasta el momento de la reserva y valen hasta la fecha indicada en la propuesta.',
 };
-const ETIQUETAS_MENSAJES = { saludo: 'Saludo (cuando solo escribe "Hola")', pedir_docs: 'Pedir la documentación (al pasar a Venta)', datos_sena: 'Datos para la seña (cuando dice que sí)', presupuesto_bajo: 'Presupuesto bajo (semáforo rojo)', sena: 'La seña no llega (a los 3 días)', comprobante: 'Pedir el comprobante', saldo_60: 'Saldo: 2 meses antes', saldo_30: 'Saldo: 1 mes antes' };
+const ETIQUETAS_MENSAJES = { saludo: '1.0 Saludo (cuando solo escribe "Hola")', listo: '1.3 Ya dio todo para cotizar (sale solo)', cierre_consulta: '1.5 Cerramos la consulta (3 días sin respuesta)', propuesta: '2.1 Mandamos la propuesta', seguimiento_propuesta: '2.2 Propuesta sin respuesta en 3 días (se cierra)', sena_recibida: '3.3 Llegó la seña (sale solo)', pedir_docs: 'Pedir la documentación (al pasar a Venta)', datos_sena: '3.1 Dice que sí: cómo se paga y datos para la seña', presupuesto_bajo: 'Presupuesto bajo (semáforo rojo)', sena: '3.2 Venció la tarifa y no llegó la seña (se cierra)', comprobante: 'Pedir el comprobante', saldo_60: '4.2 Saldo: 2 meses antes', saldo_30: '4.3 Saldo: 1 mes antes' };
 const completar = (t, v) => String(t || '').replace(/\{(\w+)\}/g, (m, k) => v[k] ?? m);
+// fecha corta como la escribe Sol: 5/12
+const diaMes = d => { if (!d) return ''; const x = new Date(String(d.toISOString?.().slice(0, 10) || d).slice(0, 10) + 'T12:00:00Z'); return `${x.getUTCDate()}/${x.getUTCMonth() + 1}`; };
+// hasta cuándo se paga el saldo: 30 días antes de la salida
+const saldoHasta = sale => { if (!sale) return '30 días antes de la salida'; const x = new Date(String(sale.toISOString?.().slice(0, 10) || sale).slice(0, 10) + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() - 30); return `el ${x.getUTCDate()}/${x.getUTCMonth() + 1} (30 días antes de la salida)`; };
 const primerNombre = n => String(n || '').replace(/^@/, '').split(' ')[0];
 
 async function leer(clave) {
@@ -51,7 +60,14 @@ const guardar = (clave, valor) => q('insert into ajustes(clave,valor) values($1,
 const todas = async () => ({ preguntas: await leer('preguntas'), minimos: await leer('minimos'), cortes: await leer('cortes') });
 const mensajes = async () => ({ ...DEFAULTS.mensajes, ...(await leer('mensajes')) });
 // si las preguntas ya se habían editado, se suman una sola vez las dos nuevas de la weekly del 24/11
+const VIEJOS_2711 = { sena: '¡Hola {nombre}! ¿Cómo va? Te escribo para saber si siguen con la idea de {destino}. Las tarifas tienen validez limitada, así que si quieren avanzar avisanos y lo reservamos.', datos_sena: '¡Qué bueno, {nombre}! 🙌 Para reservar {destino} se abona una seña de {sena} ({total_sena} en total). Te paso los datos para transferir:\nAlias: COMPLETAR EN AJUSTES\nCBU: COMPLETAR EN AJUSTES\nTitular: Paybe Turismo\nCuando la hagas, mandanos el comprobante por acá y reservamos todo. La tarifa vale hasta el {vence}.', saldo_60: '¡Hola {nombre}! Ya falta poco para {destino} ✈️ Te recordamos que el saldo del viaje se completa hasta 30 días antes de la salida: queda el último mes. Cualquier duda, escribinos.', saldo_30: '¡Hola {nombre}! Faltan 30 días para {destino}. Hoy vence el plazo del saldo: sin el pago se pierden las reservas. ¿Lo coordinamos?' };
 async function migrar() {
+  if (!await one("select 1 from ajustes where clave='migracion_mensajes_2711'")) {
+    const m = await leer('mensajes'); let cambio = false;
+    for (const [k, v] of Object.entries(VIEJOS_2711)) if (m[k] === v) { delete m[k]; cambio = true; }
+    if (cambio) await guardar('mensajes', m);
+    await q("insert into ajustes(clave,valor) values('migracion_mensajes_2711','1') on conflict do nothing");
+  }
   const r2 = await one("select valor from ajustes where clave='reglas_preguntas'");
   if (r2) { const p = JSON.parse(r2.valor); let cambio = false; for (const [t, l] of Object.entries(DEFAULTS.preguntas)) if (!p[t]) { p[t] = l; cambio = true; } if (cambio) await guardar('preguntas', p); }
   // 27/11: se saca "cuándo lo quieren confirmado" y se aclaran categoría y ocasión especial en lo guardado
@@ -155,4 +171,4 @@ function faltanParaCotizar(c, destinos) {
     : vacio(c[k])).concat(c.servicio ? [] : ['tipo']);
 }
 
-module.exports = { serviciosDe, necesariosDe, NECESARIOS, NOMBRE_DATO, faltanParaCotizar, DEFAULTS, ETIQUETAS_MENSAJES, leer, guardar, todas, mensajes, migrar, completar, primerNombre, evaluar, minimoPara, minimoUSD, esArgentina };
+module.exports = { diaMes, saldoHasta, serviciosDe, necesariosDe, NECESARIOS, NOMBRE_DATO, faltanParaCotizar, DEFAULTS, ETIQUETAS_MENSAJES, leer, guardar, todas, mensajes, migrar, completar, primerNombre, evaluar, minimoPara, minimoUSD, esArgentina };

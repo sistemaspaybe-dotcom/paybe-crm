@@ -143,7 +143,22 @@ ${hilo}
   // 2 · ¿está todo lo que Sol necesita para cotizar? Lo decide la ficha (los datos de abajo), no la IA
   const ahora = await one('select * from casos where id=$1', [c.id]);
   const faltan = reglas.faltanParaCotizar(ahora, await q('select * from destinos where caso_id=$1', [c.id]));
-  if (!faltan.length) return ponerSemaforo(c.id, R);
+  if (!faltan.length) {
+    await ponerSemaforo(c.id, R);
+    // 1.3 · ya dio todo: se le avisa que se le arma la cotización (sale solo; si algún destino da rojo, no: eso lo ve Sol)
+    const ahora = await one('select etapa, preguntas_en from casos where id=$1', [c.id]);
+    const rojo = await one(`select 1 from destinos where caso_id=$1 and semaforo='rojo' and estado<>'descartado'`, [c.id]);
+    if (ahora?.etapa === 'para_cotizar' && ahora.preguntas_en && !rojo && d.aporta !== false
+        && !await one(`select 1 from actividad where caso_id=$1 and texto like '1.3%'`, [c.id])) {
+      const M = await reglas.mensajes();
+      const ds = await q(`select nombre from destinos where caso_id=$1 and estado<>'descartado' order by id`, [c.id]);
+      const texto = reglas.completar(M.listo, { nombre: reglas.primerNombre(c.nombre), destino: ds.map(x => x.nombre).join(' y ') || 'tu viaje' });
+      await anotar(c.id, '1.3 · Ya dio todo para cotizar: se le avisa que le armamos la cotización.');
+      if (!await mandarAuto(c.id, texto, 'el aviso de que le armamos la cotización'))
+        await q(`update casos set borrador=$1, borrador_tipo='listo', borrador_en=now() where id=$2 and borrador is null`, [texto, c.id]);
+    }
+    return;
+  }
   const mensaje = txt(d.mensaje) ? String(d.mensaje).trim().slice(0, 950) : null;
   // 3 · si falta algo, se le pregunta. La primera vez, todo junto; después, solo lo que sigue faltando
   if ((repreguntar || modoPreguntar) && d.aporta === false && await one('select 1 from mensajes where caso_id=$1 and not entrante limit 1', [c.id])) {
@@ -199,14 +214,23 @@ async function mandarSolo(casoId, texto, { repregunta = false } = {}) {
       and creada > (select max(creado) from mensajes where caso_id=$1 and entrante)`, [casoId])) return;
   // si el equipo le escribió a mano en las últimas 12 h, la conversación la lleva el equipo
   if (!repregunta && await one(`select 1 from mensajes where caso_id=$1 and not entrante and auto is null and creado > now() - interval '12 hours'`, [casoId])) return;
+  await mandarAuto(casoId, texto, 'las preguntas para cotizar');
+}
+// manda un mensaje automático si se puede: está activado, el cliente fue el último en escribir (hace menos de 23 h),
+// no le mandamos otro automático desde su último mensaje y el canal lo deja. Devuelve true si salió.
+async function mandarAuto(casoId, texto, que) {
+  if (!await autoActivado()) return false;
+  if (await one(`select 1 from actividad where caso_id=$1 and quien='IA' and texto like 'La IA le mandó sola%'
+      and creada > (select max(creado) from mensajes where caso_id=$1 and entrante)`, [casoId])) return false;
   const ult = await one('select entrante, creado from mensajes where caso_id=$1 order by creado desc limit 1', [casoId]);
-  if (!ult || !ult.entrante || Date.now() - new Date(ult.creado) > 23 * 3600e3) return;
+  if (!ult || !ult.entrante || Date.now() - new Date(ult.creado) > 23 * 3600e3) return false;
   const canales = require('./canales');
-  if (!(await canales.canalDe(casoId, { auto: true }))?.puede) return;
+  if (!(await canales.canalDe(casoId, { auto: true }))?.puede) return false;
   try {
     const por = await canales.enviar(casoId, texto, { auto: true });
-    await anotar(casoId, 'La IA le mandó sola las preguntas para cotizar por ' + por + '.');
-  } catch (e) { await anotar(casoId, 'No se pudieron mandar solas las preguntas: ' + e.message + '. Quedó el borrador para mandarlo a mano.'); }
+    await anotar(casoId, `La IA le mandó sola ${que} por ${por}.`);
+    return true;
+  } catch (e) { await anotar(casoId, `No se pudo mandar solo (${que}): ${e.message}. Quedó el borrador para mandarlo a mano.`); return false; }
 }
 
 async function ponerSemaforo(casoId, R) {
@@ -255,20 +279,34 @@ async function revisarRecordatorios() {
 
 // seguimiento de la cotización: a los 3 y a los 7 días sin respuesta, borrador de "¿qué les pareció?"
 async function revisarSeguimientos() {
-  const rs = await q(`select c.id, p.nombre, k.enviada_en, d.nombre destino from casos c join personas p on p.id=c.persona_id
+  const M = await reglas.mensajes();
+  // 2.2 · la propuesta lleva 3 días sin respuesta: un solo mensaje con la fecha de congelamiento; al mandarlo se cierra la consulta
+  const rs = await q(`select c.id, p.nombre, k.enviada_en, k.valida_hasta, d.nombre destino from casos c join personas p on p.id=c.persona_id
     join lateral (select * from cotizaciones where caso_id=c.id and estado='mandada' order by enviada_en desc nulls last limit 1) k on true
     left join destinos d on d.id=k.destino_id
     where c.fase='lead' and c.etapa='esperando' and c.borrador is null and k.enviada_en is not null
       and not exists (select 1 from mensajes m where m.caso_id=c.id and m.entrante and m.creado > k.enviada_en)
-      and ((k.enviada_en < now() - interval '3 days' and not exists (select 1 from actividad a where a.caso_id=c.id and a.texto like 'Seguimiento 1%' and a.creada > k.enviada_en))
-        or (k.enviada_en < now() - interval '7 days' and not exists (select 1 from actividad a where a.caso_id=c.id and a.texto like 'Seguimiento 2%' and a.creada > k.enviada_en)))`);
+      and k.enviada_en < now() - interval '3 days'
+      and not exists (select 1 from actividad a where a.caso_id=c.id and (a.texto like '2.2%' or a.texto like 'Seguimiento%') and a.creada > k.enviada_en)`);
   for (const r of rs) {
-    const segunda = (Date.now() - new Date(r.enviada_en)) > 7 * 864e5;
-    const nombre = String(r.nombre || '').replace(/^@/, '').split(' ')[0];
-    const texto = segunda ? `¡Hola ${nombre}! ¿Cómo vienen con la idea${r.destino ? ' de ' + r.destino : ''}? Si quieren ajustar algo de la propuesta, lo vemos 😊` : `¡Hola ${nombre}! ¿Pudieron ver la propuesta${r.destino ? ' de ' + r.destino : ''}? ¿Qué les pareció?`;
-    await q(`update casos set borrador=$1, borrador_tipo='seguimiento', borrador_en=now() where id=$2`, [texto, r.id]);
-    await anotar(r.id, (segunda ? 'Seguimiento 2' : 'Seguimiento 1') + ': la IA armó el mensaje de seguimiento de la cotización.');
+    const texto = reglas.completar(M.seguimiento_propuesta, { nombre: reglas.primerNombre(r.nombre), destino: r.destino || 'tu viaje', vence: r.valida_hasta ? reglas.diaMes(r.valida_hasta) : 'la fecha de la propuesta' });
+    await q(`update casos set borrador=$1, borrador_tipo='cierre_propuesta', borrador_en=now() where id=$2`, [texto, r.id]);
+    await q(`insert into avisos(caso_id,para,texto) values($1,current_date,$2)`, [r.id, 'Propuesta sin respuesta: mandarle el último mensaje y se cierra']);
+    await anotar(r.id, '2.2 · 3 días sin respuesta a la propuesta: quedó armado el último mensaje. Al mandarlo, la consulta se cierra.');
+  }
+  // 1.5 · 3 días desde que se le hicieron las preguntas, sin respuesta: queda armado el cierre
+  const sin = await q(`select c.id, p.nombre, (select string_agg(nombre, ' y ' order by id) from destinos where caso_id=c.id and estado<>'descartado') destinos, c.destino
+    from casos c join personas p on p.id=c.persona_id
+    join lateral (select entrante, creado from mensajes where caso_id=c.id order by creado desc limit 1) u on true
+    where c.fase='lead' and c.etapa='aguardando' and c.preguntas_en is not null and (c.borrador is null or c.borrador_tipo='recordatorio')
+      and not u.entrante and u.creado < now() - interval '3 days'
+      and not exists (select 1 from actividad a where a.caso_id=c.id and a.texto like '1.5%' and a.creada > u.creado)`);
+  for (const r of sin) {
+    const texto = reglas.completar(M.cierre_consulta, { nombre: reglas.primerNombre(r.nombre), destino: r.destinos || r.destino || 'tu viaje' });
+    await q(`update casos set borrador=$1, borrador_tipo='cierre', borrador_en=now() where id=$2`, [texto, r.id]);
+    await q(`insert into avisos(caso_id,para,texto) values($1,current_date,$2)`, [r.id, 'No contestó en 3 días: mandarle el cierre']);
+    await anotar(r.id, '1.5 · Pasaron 3 días sin respuesta: quedó armado el mensaje de cierre. Al mandarlo, la consulta se cierra.');
   }
 }
 
-module.exports = { clasificar, hayIA, programar, analizar, ponerSemaforo, revisarRecordatorios, revisarSeguimientos, enCola };
+module.exports = { mandarAuto, clasificar, hayIA, programar, analizar, ponerSemaforo, revisarRecordatorios, revisarSeguimientos, enCola };

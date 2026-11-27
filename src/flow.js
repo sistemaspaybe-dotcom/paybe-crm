@@ -8,7 +8,7 @@ const FASES = {
 };
 // acciones de un toque: clave -> { desde, a:[fase,etapa], label, log, pago?, aviso? }
 const ACCIONES = {
-  datos_sena: { desde: 'oportunidad.le_intereso', a: ['oportunidad', 'falta_sena'], label: 'Ya le mandé los datos de la seña', mensaje: true, log: 'Se mandaron los datos para la seña. Si en 3 días no llega, se arma un mensaje para preguntarle si sigue.' },
+  datos_sena: { desde: 'oportunidad.le_intereso', a: ['oportunidad', 'falta_sena'], label: 'Ya le mandé los datos de la seña', mensaje: true, log: 'Se mandaron los datos para la seña. Si vence la tarifa sin la seña, queda armado el mensaje de cierre.' },
   sena: { desde: 'oportunidad.falta_sena', a: ['oportunidad', 'sena_pagada'], label: 'Llegó la seña', log: 'Llegó la seña.', pago: 'Seña' },
   a_venta: { desde: 'oportunidad.sena_pagada', a: ['venta', 'pedir_docs'], label: 'Pasar a Venta', log: 'Pasó a Venta: hay que pedirles la documentación.' },
   docs_pedidos: { desde: 'venta.pedir_docs', a: ['venta', 'docs'], label: 'Ya se la pedí → Junta de documentos', log: 'Se le pidió la documentación de los pasajeros.', mensaje: true, aviso: [3, 'Revisar si llegaron los documentos de los pasajeros'] },
