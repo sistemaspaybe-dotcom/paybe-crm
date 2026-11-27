@@ -11,7 +11,7 @@ let cola = Promise.resolve();
 const enCola = f => (cola = cola.then(f).catch(e => console.error('IA:', e.message)));
 const pendientes = new Map(); // espera unos segundos por si llegan varios mensajes seguidos
 function programar(casoId) {
-  if (!hayIA()) return;
+  if (!hayIA()) return enCola(() => preguntasSinIA(casoId));
   clearTimeout(pendientes.get(casoId));
   pendientes.set(casoId, setTimeout(() => { pendientes.delete(casoId); enCola(() => analizar(casoId)); }, Number(process.env.IA_ESPERA_MS) || 4000));
 }
@@ -132,6 +132,19 @@ ${hilo}
 const MAX_REPREGUNTAS = 2;
 const PREGUNTA = { tipo: '¿Qué estás buscando: viaje armado, solo aéreo, hotel o visa?', destino: '¿A qué destino te gustaría ir?', fechas: '¿Para qué fechas lo pensás?', dias: '¿Cuántos días?', cuantos: '¿Cuántos viajan?', presupuesto: '¿Qué presupuesto manejan por persona, más o menos?', salida: '¿Desde qué ciudad salen?', categoria: '¿Qué categoría buscan (aéreo económico o business, tipo de alojamiento)?' };
 const repreguntaFija = (nombre, faltan) => `¡Gracias${nombre ? ' ' + String(nombre).replace(/^@/, '').split(' ')[0] : ''}! Para armarte la propuesta me faltaría:\n${faltan.map((k, i) => `${faltan.length > 1 ? i + 1 + '. ' : ''}${PREGUNTA[k]}`).join('\n')}`;
+// sin IA (todavía sin créditos): a un lead nuevo se le deja armado el mensaje con las preguntas fijas
+// para cotizar. No se manda solo, porque sin IA no sabemos si es una consulta o un mensaje personal.
+async function preguntasSinIA(casoId) {
+  const c = await one(`select c.*, p.nombre from casos c join personas p on p.id=c.persona_id where c.id=$1`, [casoId]);
+  if (!c || c.fase !== 'lead' || c.etapa !== 'nuevo' || c.borrador) return;
+  if (await one('select 1 from mensajes where caso_id=$1 and not entrante limit 1', [casoId])) return; // ya le contestaron
+  const faltan = reglas.faltanParaCotizar(c, await q(`select * from destinos where caso_id=$1 and estado<>'descartado'`, [casoId]));
+  if (!faltan.length) return;
+  const nombre = reglas.primerNombre(c.nombre);
+  const texto = `¡Hola${nombre ? ' ' + nombre : ''}! Gracias por escribirnos 😊 Para armarte una propuesta a medida, contame:\n${faltan.map((k, i) => `${i + 1}. ${PREGUNTA[k]}`).join('\n')}`;
+  await q(`update casos set borrador=$1, borrador_tipo='preguntas', borrador_en=now(), etapa='preguntando', actualizado=now() where id=$2`, [texto, casoId]);
+  await anotar(casoId, 'Se armó el mensaje con las preguntas para cotizar (sin IA). Pasa a Preguntando.');
+}
 const autoActivado = async () => (await one(`select valor from ajustes where clave='auto_preguntas'`))?.valor !== 'no';
 async function mandarSolo(casoId, texto, { repregunta = false } = {}) {
   if (!await autoActivado()) return;
