@@ -194,8 +194,9 @@ async function mandarSolo(casoId, texto, { repregunta = false } = {}) {
   if (!c || (c.preguntas_en && !repregunta)) return;
   // volver a preguntar solo: únicamente si antes se le mandaron las preguntas para cotizar (no si el equipo le escribió otra cosa)
   if (repregunta && !c.preguntas_en) return;
-  // nunca dos mensajes automáticos en menos de 12 h al mismo chat
-  if (await one(`select 1 from actividad where caso_id=$1 and quien='IA' and texto like 'La IA le mandó sola%' and creada > now() - interval '12 hours'`, [casoId])) return;
+  // nunca dos mensajes automáticos seguidos: entre uno y otro el cliente tiene que haber contestado
+  if (await one(`select 1 from actividad where caso_id=$1 and quien='IA' and texto like 'La IA le mandó sola%'
+      and creada > (select max(creado) from mensajes where caso_id=$1 and entrante)`, [casoId])) return;
   // si el equipo le escribió a mano en las últimas 12 h, la conversación la lleva el equipo
   if (!repregunta && await one(`select 1 from mensajes where caso_id=$1 and not entrante and auto is null and creado > now() - interval '12 hours'`, [casoId])) return;
   const ult = await one('select entrante, creado from mensajes where caso_id=$1 order by creado desc limit 1', [casoId]);
