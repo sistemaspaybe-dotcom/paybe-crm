@@ -3,7 +3,24 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
 });
-const q = (sql, p) => pool.query(sql, p).then(r => r.rows);
+const { AsyncLocalStorage } = require('async_hooks');
+// Quién está haciendo cada cosa (equipo, Instagram, WhatsApp, automático). Lo leen los triggers del registro.
+const contexto = new AsyncLocalStorage();
+const ESCRIBE = /^\s*(insert|update|delete|with)\b/i;
+async function query(sql, p) {
+  const c = contexto.getStore();
+  if (!c || !ESCRIBE.test(sql)) return pool.query(sql, p);
+  const cli = await pool.connect();
+  try {
+    await cli.query('begin');
+    await cli.query(`select set_config('app.quien',$1,true), set_config('app.origen',$2,true), set_config('app.ruta',$3,true), set_config('app.req',$4,true)`,
+      [c.quien || '', c.origen || '', c.ruta || '', c.req || '']);
+    const r = await cli.query(sql, p);
+    await cli.query('commit');
+    return r;
+  } catch (e) { await cli.query('rollback').catch(() => {}); throw e; } finally { cli.release(); }
+}
+const q = (sql, p) => query(sql, p).then(r => r.rows);
 const one = (sql, p) => q(sql, p).then(r => r[0]);
 
 const SCHEMA = `
@@ -122,6 +139,59 @@ create or replace function aviso_sin_repetir() returns trigger as $f$ begin
 drop trigger if exists aviso_sin_repetir on avisos;
 create trigger aviso_sin_repetir before insert on avisos for each row execute function aviso_sin_repetir();
 `;
+// ---- Registro (auditoría): todo cambio en cualquier tabla queda guardado, con quién, desde dónde y qué cambió ----
+const REGISTRO = `
+create table if not exists log_cambios (
+  id bigserial primary key, en timestamptz not null default now(), quien text, origen text, ruta text, req text,
+  tabla text not null, op text not null, fila_id text, caso_id int, persona_id int,
+  antes jsonb, despues jsonb, cambios jsonb);
+create index if not exists log_cambios_en on log_cambios(en desc);
+create index if not exists log_cambios_caso on log_cambios(caso_id, en desc);
+create index if not exists log_cambios_persona on log_cambios(persona_id, en desc);
+create index if not exists log_cambios_tabla on log_cambios(tabla, fila_id);
+create table if not exists log_acciones (
+  id bigserial primary key, en timestamptz not null default now(), req text, quien text, origen text,
+  metodo text, ruta text, datos jsonb, estado int, ms int, ip text, navegador text);
+create index if not exists log_acciones_en on log_acciones(en desc);
+create index if not exists log_acciones_quien on log_acciones(quien, en desc);
+create or replace function registrar_cambio() returns trigger as $f$
+declare a jsonb; d jsonb; ch jsonb; fila jsonb;
+  vquien text := nullif(current_setting('app.quien', true), '');
+  vorigen text := coalesce(nullif(current_setting('app.origen', true), ''), 'sistema');
+begin
+  if tg_op <> 'INSERT' then a := to_jsonb(old) - 'datos'; end if;
+  if tg_op <> 'DELETE' then d := to_jsonb(new) - 'datos'; end if;
+  if tg_op = 'UPDATE' then
+    select jsonb_object_agg(k, jsonb_build_object('antes', a->k, 'despues', d->k)) into ch
+      from jsonb_object_keys(d) as k where (a->k) is distinct from (d->k) and k <> 'actualizado';
+    if ch is null then return null; end if; -- no cambió nada de verdad
+  end if;
+  -- la sincronización de Instagram/WhatsApp guarda marcas de tiempo en ajustes cada pocos minutos: eso no es una acción
+  if tg_table_name = 'ajustes' and vquien is null and vorigen = 'sistema' then return null; end if;
+  fila := coalesce(d, a);
+  insert into log_cambios(quien, origen, ruta, req, tabla, op, fila_id, caso_id, persona_id, antes, despues, cambios)
+  values (vquien, vorigen, nullif(current_setting('app.ruta', true), ''), nullif(current_setting('app.req', true), ''),
+    tg_table_name, lower(tg_op),
+    coalesce(fila->>'id', fila->>'clave', concat_ws('-', fila->>'caso_id', fila->>'persona_id')),
+    case when tg_table_name = 'casos' then (fila->>'id')::int else (fila->>'caso_id')::int end,
+    case when tg_table_name = 'personas' then (fila->>'id')::int else (fila->>'persona_id')::int end,
+    case when tg_op = 'UPDATE' then null else a end, case when tg_op = 'UPDATE' then null else d end, ch);
+  return null;
+exception when others then
+  raise warning 'registro: %', sqlerrm; return null; -- el registro nunca frena el trabajo del equipo
+end $f$ language plpgsql;
+create or replace function registro_inmutable() returns trigger as $f$ begin
+  raise exception 'El registro no se puede modificar ni borrar'; end $f$ language plpgsql;
+drop trigger if exists registro_inmutable on log_cambios;
+create trigger registro_inmutable before update or delete on log_cambios for each row execute function registro_inmutable();
+drop trigger if exists registro_inmutable on log_acciones;
+create trigger registro_inmutable before update or delete on log_acciones for each row execute function registro_inmutable();
+do $d$ declare t text; begin
+  for t in select tablename from pg_tables where schemaname = current_schema() and tablename not in ('log_cambios', 'log_acciones') loop
+    execute format('drop trigger if exists zz_registro on %I', t);
+    execute format('create trigger zz_registro after insert or update or delete on %I for each row execute function registrar_cambio()', t);
+  end loop; end $d$;
+`;
 // cambios de etapas de una sola vez (17/11): Mandada pasa a Esperando respuesta; el viejo Preguntando (ya contestaron) es Aguardando datos
 async function migrar() {
   const hecho = await one("select 1 from ajustes where clave='migracion_etapas_v4'");
@@ -133,4 +203,4 @@ async function migrar() {
   await q(`insert into destinos(caso_id,nombre,fechas,presupuesto,estado) select id, destino, fechas, presupuesto, case when fase='lead' then 'pendiente' else 'eligio' end from casos c where destino is not null and destino<>'' and not exists (select 1 from destinos d where d.caso_id=c.id)`);
   await q("insert into ajustes(clave,valor) values('migracion_etapas_v4', now()::text)");
 }
-module.exports = { pool, q, one, init: () => pool.query(SCHEMA).then(migrar) };
+module.exports = { pool, q, one, contexto, init: () => pool.query(SCHEMA).then(() => pool.query(REGISTRO)).then(migrar) };

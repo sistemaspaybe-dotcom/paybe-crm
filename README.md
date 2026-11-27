@@ -40,3 +40,19 @@ Variables: `YCLOUD_API_KEY` (y opcional `YCLOUD_NUMERO`, `PUBLIC_URL`; si no, us
 ## Contactos personales
 
 Sol usa su número también para lo personal. Botón "Personal" (ficha y Filtrados): borra los mensajes y el lead de ese contacto y marca `personas.personal`; lo que mande después (y lo que Sol le conteste) no se guarda, ni por WhatsApp ni por Instagram. Lista y deshacer en Ajustes → Contactos personales.
+
+## Registro (auditoría, 26/11)
+
+Todo queda guardado en Postgres y no se puede editar ni borrar (lo frena un trigger):
+
+- **`log_cambios`**: cada fila que se crea, cambia o borra en *cualquier* tabla (triggers `zz_registro`, se ponen solos al arrancar, también en tablas nuevas). Guarda quién (`quien`), desde dónde (`origen`: equipo / instagram / whatsapp / automático / sistema / página pública), la pantalla (`ruta`), la consulta y la persona, y el antes → después de cada campo que cambió (en altas y bajas, la fila entera). Los archivos (bytea) no se copian.
+- **`log_acciones`**: cada cosa que el equipo manda desde la app (formulario cargado, sin contraseñas ni archivos), cada página que abre, y los intentos de entrar (bien o mal).
+- Quién hizo cada cosa viaja con `AsyncLocalStorage` (`src/db.js` → `contexto`): las escrituras corren en una transacción que setea `app.quien`, `app.origen`, `app.ruta`, `app.req` para que el trigger los lea.
+- Pantalla en **Ajustes → Registro** (`/registro`): filtros por quién, qué, consulta y fechas; descarga CSV.
+
+```sql
+-- todo lo que hizo Sol hoy
+select en, tabla, op, fila_id, cambios from log_cambios where quien='Sol' and en > current_date order by en desc;
+-- historia completa de una consulta
+select * from log_cambios where caso_id = 123 order by en;
+```

@@ -765,6 +765,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     <div class="card" id=personales><h2>Contactos personales</h2><p class=mut>Lo que mandan estos contactos no entra al CRM (Sol usa su número también para lo personal). Se marcan con el botón "Personal" en la ficha o en Filtrados.</p>
     <table>${personales.map(p => `<tr><td>${esc(p.nombre)} <span class=mut>${esc(p.whatsapp || (p.instagram_user ? '@' + p.instagram_user : ''))}</span></td><td style="text-align:right"><form method=post action=/persona/${p.id}/no-personal><button>Ya no es personal</button></form></td></tr>`).join('') || '<tr><td class=mut>Todavía no hay ninguno.</td></tr>'}</table></div>
     <div class="card"><h2>Conexiones</h2><p><a href="/instagram">Instagram</a> · <a href="/whatsapp">WhatsApp</a></p></div>
+    <div class="card"><h2>Registro</h2><p class=mut>Todo lo que se carga, cambia o borra, con quién y cuándo.</p><p><a class="btn" href="/registro">Ver el registro</a></p></div>
     <div class="card"><h2>Consultas de prueba</h2><p class=mut>Carga 8 consultas de ejemplo (marcadas con 🧪) para mostrar cómo trabaja el CRM: preguntas armadas por la IA, varios destinos, semáforo, cotizaciones y una oportunidad. Los mensajes no salen a Instagram. Volver a cargarlas reemplaza las anteriores.</p>
     <div class="row"><form method=post action=/demo/cargar><button class="p">Cargar consultas de prueba</button></form><form method=post action=/demo/borrar><button>Borrar consultas de prueba</button></form></div></div>`, '/ajustes');
   }));

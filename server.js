@@ -10,6 +10,7 @@ const { esc, fecha, fechaDia, usd, dinero, layout, chipFase } = require('./src/v
 const ig = require('./src/instagram');
 const conv = require('./src/conversaciones');
 const wa = require('./src/whatsapp');
+const registro = require('./src/registro');
 
 const app = express();
 const EQUIPO = ['Patricia', 'Sol', 'Betina'];
@@ -18,11 +19,12 @@ app.set('trust proxy', 1);
 app.use(express.static(__dirname + '/public'));
 // Instagram avisa acá cuando alguien escribe; va antes del login porque lo llama Meta (se valida con la firma)
 app.get('/webhooks/instagram', ig.verificar);
-app.post('/webhooks/instagram', express.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf; } }), ig.recibir);
+app.post('/webhooks/instagram', express.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf; } }), registro.como('instagram', ig.recibir));
 // WhatsApp (YCloud) avisa acá; se valida con la firma
-app.post('/webhooks/whatsapp', express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }), (req, res) => wa.recibir(req, res).catch(e => { console.error(e); if (!res.headersSent) res.sendStatus(500); }));
+app.post('/webhooks/whatsapp', express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }), registro.como('whatsapp', (req, res) => wa.recibir(req, res).catch(e => { console.error(e); if (!res.headersSent) res.sendStatus(500); })));
 app.get('/privacidad', (req, res) => res.send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Privacidad · Paybe</title><body style="font:16px/1.6 system-ui;max-width:640px;margin:40px auto;padding:0 20px;color:#1F3A4D"><h1>Política de privacidad</h1><p>Esta es una herramienta interna de Paybe Turismo (EVT 6263, Av. Fleming 1897, Martínez, Buenos Aires) para organizar las consultas de sus clientes.</p><p>Cuando alguien le escribe a Paybe por Instagram, guardamos su nombre de usuario y los mensajes de esa conversación, solo para poder responder la consulta y hacer el seguimiento del viaje. No vendemos ni compartimos esos datos con terceros, y no los usamos para publicidad.</p><p>Si querés que borremos tus datos, escribinos por Instagram a @paybe.turismo o acercate a la oficina y los eliminamos.</p></body>`));
 app.use(express.urlencoded({ extended: false, limit: '15mb' })); // 15 MB: los comprobantes viajan en el formulario
+app.use(registro.middleware); // registro: de acá en adelante todo queda anotado
 require('./src/rutas').publica(app, { wrap: f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next) });
 app.use(cookieSession({ name: 's', secret: process.env.SESSION_SECRET || 'cambiar-en-produccion', maxAge: 30 * 864e5, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
@@ -35,7 +37,8 @@ app.get('/entrar', (req, res) => res.send(`<!doctype html><meta charset=utf-8><m
 <form method=post action=/entrar><div style="text-align:center"><img src="/logo.png" alt="" style="height:80px;margin-bottom:6px" onerror="this.remove()"></div><select name=quien>${EQUIPO.map(n => `<option>${n}</option>`).join('')}</select><input type=password name=pass placeholder="Contraseña" autofocus><button>Entrar</button>${req.query.mal ? '<small style="color:#B84A53">Contraseña incorrecta</small>' : ''}</form>`));
 app.post('/entrar', (req, res) => {
   if (!PASS && process.env.NODE_ENV === 'production') return res.status(503).send('Falta configurar APP_PASSWORD en Railway.');
-  if (PASS && req.body.pass !== PASS) return res.redirect('/entrar?mal=1');
+  if (PASS && req.body.pass !== PASS) { registro.entrada(req, false); return res.redirect('/entrar?mal=1'); }
+  registro.entrada(req, true);
   req.session.quien = EQUIPO.includes(req.body.quien) ? req.body.quien : 'Equipo';
   res.redirect('/');
 });
@@ -43,6 +46,8 @@ app.get('/salir', (req, res) => { req.session = null; res.redirect('/entrar'); }
 app.get('/salud', (req, res) => res.send('ok'));
 app.use((req, res, next) => (req.session.quien || (!PASS && process.env.NODE_ENV !== 'production')) ? next() : res.redirect('/entrar'));
 app.use((req, res, next) => { if (!req.session.quien) req.session.quien = 'Equipo'; next(); });
+app.use(registro.identificar);
+registro.rutas(app, { wrap, page });
 
 // ---- listas ----
 const SEMI = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };
@@ -248,6 +253,6 @@ app.post('/instagram/sincronizar', wrap(async (req, res) => {
 
 app.use((e, req, res, next) => { console.error(e); res.status(500).send('Algo salió mal. Probá de nuevo.'); });
 const port = process.env.PORT || 3000;
-db.init().then(reglas.migrar).then(conv.limpiarViejos).then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); ig.iniciar().catch(e => console.error('Instagram:', e.message)); wa.iniciar().catch(e => console.error('WhatsApp:', e.message));
-  const tarea = () => ia.revisarRecordatorios().then(ia.revisarSeguimientos).then(despues.revisar).catch(e => console.error('Recordatorios:', e.message));
+db.init().then(reglas.migrar).then(conv.limpiarViejos).then(() => app.listen(port, () => { console.log('Paybe CRM en el puerto ' + port); registro.como('instagram', () => ig.iniciar().catch(e => console.error('Instagram:', e.message)))(); registro.como('whatsapp', () => wa.iniciar().catch(e => console.error('WhatsApp:', e.message)))();
+  const tarea = registro.como('automático', () => ia.revisarRecordatorios().then(ia.revisarSeguimientos).then(despues.revisar).catch(e => console.error('Recordatorios:', e.message)));
   setTimeout(tarea, 30e3); setInterval(tarea, 5 * 60e3).unref(); })).catch(e => { console.error(e); process.exit(1); });
