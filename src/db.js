@@ -71,6 +71,7 @@ alter table cotizaciones add column if not exists sena_pct numeric default 20;
 alter table cotizaciones add column if not exists valida_hasta date;
 alter table cotizaciones add column if not exists no_incluye text;
 alter table cotizaciones add column if not exists token text;
+alter table cotizaciones add column if not exists mandada_por text;
 alter table cotizaciones add column if not exists base_id int;
 alter table cotizaciones add column if not exists inicio timestamptz;
 alter table cotizaciones add column if not exists enviada_en timestamptz;

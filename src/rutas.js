@@ -144,7 +144,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
           ${[...ks].reverse().map(k => { const ESTV = { borrador: ['En armado', '#FFF3D6', '#8A5A00'], mandada: ['Mandada', '#E3EEF7', 'var(--azul)'], aceptada: ['Aceptada ✓', '#E0F0E6', 'var(--verde)'], reemplazada: ['Reemplazada', '#F1F1F1', '#7A848C'], no_eligio: ['No eligió', '#F1F1F1', '#7A848C'] }[k.estado] || [k.estado, '#F1F1F1', '#5A6670'];
             const viejo = ['reemplazada', 'no_eligio'].includes(k.estado);
             return `<div class="row" style="justify-content:space-between;padding:12px 14px;border:2px solid ${k.estado === 'borrador' ? '#F2D79B' : '#F0E6E1'};border-radius:12px;margin-top:8px;background:#fff${viejo ? ';opacity:.6' : ''}">
-            <span class=row style="gap:12px"><span style="font-size:18px;font-weight:800;color:var(--azul)">Versión ${k.version}</span><span class=chip style="background:${ESTV[1]};color:${ESTV[2]}">${ESTV[0]}</span><span><b>${dinero(k.precio_pp ?? (totales(k.items || []).precio || null), k.moneda)}</b> <span class=mut>por persona${k.valida_hasta ? ' · válida hasta ' + fecha(k.valida_hasta) : ''}${k.mandada ? ' · mandada el ' + fecha(k.mandada) : ''}</span></span></span>
+            <span class=row style="gap:12px"><span style="font-size:18px;font-weight:800;color:var(--azul)">Versión ${k.version}</span><span class=chip style="background:${ESTV[1]};color:${ESTV[2]}">${ESTV[0]}</span><span><b>${dinero(k.precio_pp ?? (totales(k.items || []).precio || null), k.moneda)}</b> <span class=mut>por persona${k.valida_hasta ? ' · válida hasta ' + fecha(k.valida_hasta) : ''}${k.mandada ? ' · mandada el ' + fecha(k.mandada) + (k.mandada_por ? ' por ' + esc(k.mandada_por) : '') : ''}</span></span></span>
             <span class=row style="gap:6px"><a class=btn href="/cotizacion/${k.id}/propuesta">👁 Ver</a>${k.estado === 'borrador' ? `<a class="btn p" href="/destino/${d.id}/cotizar">✎ Editar</a>` : ''}</span></div>`; }).join('')}</div>` : ''}
         ${d.semaforo === 'rojo' && !cerrado && c.fase === 'lead' ? `<form method=post action=/destino/${d.id}/respuesta-estandar style="margin-top:8px"><button class="p">Armar la respuesta estándar</button> <span class=mut>Explica que cuidamos la calidad y propone más presupuesto, menos días u otro destino.</span></form>` : ''}
         <div class="row" style="margin-top:10px">${boton}${!cerrado && c.fase === 'lead' ? `<form method=post action=/destino/${d.id}/descartar><button>Descartar</button></form>` : ''}
@@ -452,10 +452,11 @@ module.exports = function (app, { wrap, page, log, hace }) {
     </script>`, '/leads');
   }));
 
-  const marcarMandada = async (req, kk, c, d, como = '') => {
+  const marcarMandada = async (req, kk, c, d, por = 'a mano') => {
+    const como = ' por ' + por;
     const k = kk;
     await q(`update cotizaciones set estado='reemplazada' where destino_id=$1 and estado='mandada' and id<>$2`, [k.destino_id, k.id]);
-    await q(`update cotizaciones set estado='mandada', enviada_en=now(), mandada=current_date where id=$1`, [k.id]);
+    await q(`update cotizaciones set estado='mandada', enviada_en=now(), mandada=current_date, mandada_por=$2 where id=$1`, [k.id, por]);
     await q(`update destinos set estado='cotizado' where id=$1`, [k.destino_id]);
     await q(`update avisos set hecho=true where caso_id=$1 and texto='Está para cotizar'`, [k.caso_id]);
     const pendientes = await one(`select count(*)::int n from destinos where caso_id=$1 and estado='cotizando'`, [c.id]);
@@ -488,7 +489,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
     ].filter(Boolean).join('');
     const envio = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${borrador ? 'Mandársela' : 'Volver a mandársela'}</h2>${chat ? `<span class=mut>Escribió por ${chat.nombre}${chat.ventana ? '' : ' hace más de 24 h (no se puede mandar desde el CRM)'}</span>` : ''}</div>
       <div class=row style="margin-top:10px;gap:8px;flex-wrap:wrap">${opciones}</div>
-      ${borrador ? `<form method=post action=/cotizacion/${k.id}/mandar class=row style="margin-top:10px;gap:8px;align-items:center"><input type=hidden name=como value=manual><span class=mut>¿La mandaste por WhatsApp, Instagram, mail o el PDF desde afuera?</span><button>Ya la mandé → Esperando respuesta</button></form>` : `<p class=mut style="margin-top:8px">Ya está mandada${k.mandada ? ' (' + fecha(k.mandada) + ')' : ''}.</p>`}</div>`;
+      ${borrador ? `<form method=post action=/cotizacion/${k.id}/mandar class=row style="margin-top:10px;gap:8px;align-items:center"><input type=hidden name=como value=manual><span class=mut>¿La mandaste por WhatsApp, Instagram, mail o el PDF desde afuera?</span><button>Ya la mandé → Esperando respuesta</button></form>` : `<p style="margin-top:8px"><b>✓ Esta versión ya se mandó${k.mandada ? ' el ' + fecha(k.mandada) : ''}${k.mandada_por ? ' por ' + esc(k.mandada_por) : ''}.</b> <span class=mut>Si la volvés a mandar, queda registrado.</span></p>`}</div>`;
     page(req, res, 'Propuesta ' + (d?.nombre || ''), `<div class=mut>${FASES[c.fase].nombre}</div><h1>${esc(c.nombre)}</h1>${barraLinks(c)}${subtabs(c, ds, cots, 'p' + k.id)}
       <div class="row" style="justify-content:space-between;margin:6px 0 10px"><h2 style="margin:0">${esc(d?.nombre || k.viaje || '')} · propuesta v${k.version}${k.estado === 'borrador' ? ' <span class=chip>borrador</span>' : ''}</h2>
       <span class=row>${k.estado === 'borrador' && d ? `<a class="btn p" href="/destino/${d.id}/cotizar">✎ Seguir editando</a>` : ''}<a class=btn href="/c/${k.token}" target=_blank rel=noopener>Abrir aparte ↗</a></span></div>
@@ -504,7 +505,9 @@ module.exports = function (app, { wrap, page, log, hace }) {
       try { await canales.enviar(c.id, textoPropuesta(c, d, `${req.protocol}://${req.get('host')}/c/${kk.token}`)); }
       catch (e) { await log(c.id, 'CRM', 'No se pudo mandar la propuesta: ' + e.message); return res.redirect(`/cotizacion/${kk.id}/propuesta`); }
     }
-    if (kk.estado === 'borrador') await marcarMandada(req, kk, c, d, req.body.como === 'chat' ? '' : ' (a mano)');
+    const por = req.body.como === 'chat' ? (await canales.canalDe(c.id))?.nombre || 'chat' : 'a mano';
+    if (kk.estado === 'borrador') await marcarMandada(req, kk, c, d, por);
+    else await log(c.id, req.session.quien, `Se volvió a mandar la versión ${kk.version} de ${d?.nombre} por ${por}.`);
     res.redirect('/caso/' + c.id);
   }));
 
@@ -535,7 +538,7 @@ module.exports = function (app, { wrap, page, log, hace }) {
       try { await canales.enviar(c.id, texto); }
       catch (e) { await log(c.id, 'CRM', 'No se pudo mandar la propuesta: ' + e.message); return res.redirect(`/destino/${k.destino_id}/cotizar`); }
     }
-    await marcarMandada(req, kk, c, d);
+    await marcarMandada(req, kk, c, d, accion === 'mandar_chat' ? (await canales.canalDe(c.id))?.nombre || 'chat' : 'a mano');
     res.redirect('/caso/' + c.id);
   }));
 
